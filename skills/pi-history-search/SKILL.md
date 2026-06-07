@@ -1,0 +1,69 @@
+# pi-history-search
+
+Use this skill when you need to find, narrow, or quote prior Pi coding agent conversation context with `pi-history`.
+
+## Workflow
+
+Start with the search mode that matches the task. For conceptual recall, prefer semantic or hybrid:
+
+```sh
+pi-history agent search --hybrid "deployment rollback decision" --top 5
+pi-history agent search --semantic "why the cache invalidation approach changed" --top 5
+```
+
+For exact terms, identifiers, filenames, commands, error messages, or stack traces, use lexical or exact:
+
+```sh
+pi-history agent search --lexical "auth cache bug"
+pi-history agent search --exact "DEPLOYMENT_TOKEN"
+```
+
+The output is protocol text, not JSON. Global search is grouped by conversation, with readable snippets after `|` and copyable `read ref=... focus=...` lines:
+
+```text
+protocol agent-search v=2 mode=lexical groups=1 hits=1
+query text=auth%20cache%20bug hits=1
+groups count=1
+conversation rank=1 ref=ch_1234abcd5678 score=12.500000 hits=1 total=1 | fix auth cache
+hit ref=ch_1234abcd5678 source=lexical score=12.500000 focus=m8..m8 | auth cache bug repro
+read ref=ch_1234abcd5678:m7..m9 focus=m8..m8
+```
+
+Copy the emitted `read ref=... focus=...` line as an instruction for the next command. Do not treat hit order, scores, ranks, or chunks as stable addresses.
+
+If the top hit is probably the right conversation but you need better evidence inside it, narrow first:
+
+```sh
+pi-history agent within ch_1234abcd5678 --lexical "auth cache bug"
+```
+
+If you need to choose a section before reading, outline the conversation:
+
+```sh
+pi-history agent outline ch_1234abcd5678
+```
+
+Then read only the emitted range and preserve `focus=` in `--focus`:
+
+```sh
+pi-history agent read ch_1234abcd5678:m7..m9 --focus m8..m8
+```
+
+Use one `agent read` command per emitted `read` line unless you qualify focus with the conversation ref, for example `--focus ch_1234abcd5678:m8..m8`. A bare `--focus m8..m8` is only unambiguous when reading one conversation.
+
+Do not read a full transcript by default. Prefer `search`, then `within` or `outline`, then a bounded `read` range. Use `--flat` only when you need raw message-hit ordering, `--hits-per-conv` when you need more evidence from each conversation, and `--all-hits` only when duplicate suppression hides relevant tool-heavy evidence. Use `--tools`, `--tool-results`, `--thinking`, or `--subagents` only when that hidden content is relevant.
+
+## Query mode guidance
+
+Use `--semantic` when the user asks to find what was discussed, decided, designed, or debugged and the exact wording may differ. Use `--hybrid` when semantic recall is useful but concrete terms still matter, such as product names, technologies, or domain words.
+
+Use `--lexical` for identifier-like terms such as `api_key`, `build_id`, or `AgentSearchRequest`. Use `--exact` or quoted text for exact tokens, secrets, IDs, error strings, and case-sensitive identifiers:
+
+```sh
+pi-history agent search --hybrid "deployment rollback decision" --top 5
+pi-history agent search --semantic "why the cache invalidation approach changed" --top 5
+pi-history agent search --exact "DEPLOYMENT_TOKEN"
+pi-history agent within ch_1234abcd5678 --lexical "api_key"
+```
+
+After a broad semantic or hybrid search finds a likely conversation, use `within` with lexical, exact, semantic, or hybrid based on what evidence you need next. Lexical narrowing is often best when the global hit includes useful concrete terms.
