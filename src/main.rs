@@ -128,6 +128,7 @@ fn run() -> Result<()> {
         display_config.show_thinking,
         true,
     );
+    let show_info = display_config.show_info.unwrap_or(false);
     tool_format::set_render_edit_diffs(display_config.edit_diffs.unwrap_or(false));
     let plain_mode = resolve_bool_setting(args.plain, false, display_config.plain, false);
     let use_pager = resolve_bool_setting(
@@ -285,7 +286,13 @@ fn run() -> Result<()> {
                 format!("Not a file: {}", input_file.display()),
             )));
         }
-        tui::run_single_file(input_file.clone(), tool_display, show_thinking, keys)?;
+        tui::run_single_file(
+            input_file.clone(),
+            tool_display,
+            show_thinking,
+            show_info,
+            keys,
+        )?;
         return Ok(());
     }
 
@@ -321,6 +328,7 @@ fn run() -> Result<()> {
         rx,
         tool_display,
         show_thinking,
+        show_info,
         keys,
         workspace_filter,
         current_project_dir_name,

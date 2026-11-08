@@ -80,6 +80,7 @@ pub fn run_with_loader(
     rx: Receiver<LoaderMessage>,
     tool_display: ToolDisplayMode,
     show_thinking: bool,
+    show_info: bool,
     keys: KeyBindings,
     workspace_filter: bool,
     current_project_dir_name: Option<String>,
@@ -103,6 +104,7 @@ pub fn run_with_loader(
         exclude_projects,
         search_options,
     );
+    app.set_initial_show_info(show_info);
 
     loop {
         loop {
@@ -234,6 +236,7 @@ pub fn run_single_file(
     path: PathBuf,
     tool_display: ToolDisplayMode,
     show_thinking: bool,
+    show_info: bool,
     keys: KeyBindings,
 ) -> Result<()> {
     let original_hook = std::panic::take_hook();
@@ -245,6 +248,7 @@ pub fn run_single_file(
 
     let mut guard = TerminalGuard::new()?;
     let mut app = App::new_single_file(path, tool_display, show_thinking, keys);
+    app.set_initial_show_info(show_info);
 
     loop {
         let frame_area = guard.terminal.get_frame().area();

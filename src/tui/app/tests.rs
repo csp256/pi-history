@@ -1544,3 +1544,45 @@ fn single_file_mode_has_no_project_exclusions() {
     assert!(app.excluded_projects.is_empty());
     assert!(app.is_single_file_mode());
 }
+
+#[test]
+fn configured_info_toggle_applies_to_list_and_single_file_startup() {
+    let mut list = app(Vec::new(), Vec::new());
+    list.set_initial_show_info(true);
+    assert!(list.show_timing);
+    list.set_initial_show_info(false);
+    assert!(!list.show_timing);
+
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let mut single = App::new_single_file(
+        file.path().to_path_buf(),
+        ToolDisplayMode::Off,
+        false,
+        KeyBindings::default(),
+    );
+    single.set_initial_show_info(true);
+    assert!(single.show_timing);
+    let AppMode::View(state) = single.app_mode() else {
+        panic!("expected single-file viewer");
+    };
+    assert!(state.show_timing);
+    assert_eq!(state.tool_display, ToolDisplayMode::Off);
+    assert!(!state.show_thinking);
+    single.set_initial_show_info(false);
+    let AppMode::View(state) = single.app_mode() else {
+        panic!("expected single-file viewer");
+    };
+    assert!(!state.show_timing);
+}
+
+#[test]
+fn preferred_startup_settings_parse_from_config() {
+    let config: crate::config::ConfigFile = toml::from_str(
+        "[display]\ntool_display = \"off\"\nshow_thinking = false\nedit_diffs = false\nshow_info = true\n",
+    ).unwrap();
+    let display = config.display.unwrap();
+    assert_eq!(display.tool_display, Some(ToolDisplayMode::Off));
+    assert_eq!(display.show_thinking, Some(false));
+    assert_eq!(display.edit_diffs, Some(false));
+    assert_eq!(display.show_info, Some(true));
+}

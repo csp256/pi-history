@@ -470,6 +470,9 @@ cat > ~/.config/pi-history/config.toml << 'EOF'
 # Show thinking blocks (default: true)
 show_thinking = true
 
+# Show timestamps in the viewer (info toggle; default: false)
+# show_info = true
+
 # Show old/new diffs in edit tool calls (default: false; press d in viewer)
 edit_diffs = false
 
@@ -515,6 +518,7 @@ EOF
   true)
 - `show_thinking` (boolean): Show thinking blocks in conversation output
   (default: true)
+- `show_info` (boolean): Show timestamps in the viewer (the `i` / info toggle; default: false).
 - `edit_diffs` (boolean): Show old/new diffs in edit tool calls (default: false; press `d` in the viewer to toggle)
 - `plain` (boolean): Output plain text without ledger formatting (default:
   false)

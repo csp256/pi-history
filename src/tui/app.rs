@@ -347,6 +347,14 @@ impl App {
         })
     }
 
+    /// Apply the configured info toggle before the first frame is rendered.
+    pub fn set_initial_show_info(&mut self, enabled: bool) {
+        self.show_timing = enabled;
+        if let AppMode::View(state) = &mut self.app_mode {
+            state.show_timing = enabled;
+        }
+    }
+
     pub fn keys(&self) -> &KeyBindings {
         &self.keys
     }

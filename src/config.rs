@@ -139,6 +139,8 @@ pub struct DisplayConfig {
     #[allow(dead_code)]
     pub relative_time: Option<bool>,
     pub show_thinking: Option<bool>,
+    /// Show timestamps in the viewer (the info toggle).
+    pub show_info: Option<bool>,
     pub edit_diffs: Option<bool>,
     pub plain: Option<bool>,
     pub pager: Option<bool>,
