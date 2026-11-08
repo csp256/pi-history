@@ -111,25 +111,19 @@ fn run() -> Result<()> {
         tui::ToolDisplayMode::Full
     } else if args.no_tools {
         tui::ToolDisplayMode::Hidden
-    } else if let Some(mode) = display_config.tool_display {
-        mode
     } else {
-        match display_config.no_tools {
-            Some(true) => tui::ToolDisplayMode::Hidden,
-            Some(false) => tui::ToolDisplayMode::Full,
-            None => tui::ToolDisplayMode::Truncated,
-        }
+        display_config.tool_display_mode()
     };
     let show_tools = tool_display.shows_details();
     let show_last = resolve_bool_setting(args.last, args.first, display_config.last, true);
     let show_thinking = resolve_bool_setting(
         args.show_thinking,
         args.hide_thinking,
-        display_config.show_thinking,
-        true,
+        Some(display_config.show_thinking()),
+        false,
     );
-    let show_info = display_config.show_info.unwrap_or(false);
-    tool_format::set_render_edit_diffs(display_config.edit_diffs.unwrap_or(false));
+    let show_info = display_config.show_info();
+    tool_format::set_render_edit_diffs(display_config.edit_diffs());
     let plain_mode = resolve_bool_setting(args.plain, false, display_config.plain, false);
     let use_pager = resolve_bool_setting(
         args.pager,

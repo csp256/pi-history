@@ -1586,3 +1586,20 @@ fn preferred_startup_settings_parse_from_config() {
     assert_eq!(display.edit_diffs, Some(false));
     assert_eq!(display.show_info, Some(true));
 }
+
+#[test]
+fn info_is_enabled_by_default_in_both_startup_modes() {
+    assert!(app(Vec::new(), Vec::new()).show_timing);
+    let file = tempfile::NamedTempFile::new().unwrap();
+    let single = App::new_single_file(
+        file.path().to_path_buf(),
+        ToolDisplayMode::default(),
+        false,
+        KeyBindings::default(),
+    );
+    assert!(single.show_timing);
+    let AppMode::View(state) = single.app_mode() else {
+        panic!("expected single-file viewer");
+    };
+    assert!(state.show_timing);
+}
