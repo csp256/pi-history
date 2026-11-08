@@ -56,11 +56,11 @@ pub struct ToolOutputId(pub String);
 #[serde(rename_all = "lowercase")]
 pub enum ToolDisplayMode {
     /// Hide all tool calls, results, and summaries.
+    #[default]
     Off,
     #[serde(rename = "summary")]
     #[value(name = "summary")]
     Hidden,
-    #[default]
     Truncated,
     Full,
 }

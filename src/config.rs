@@ -146,6 +146,29 @@ pub struct DisplayConfig {
     pub pager: Option<bool>,
 }
 
+impl DisplayConfig {
+    pub fn tool_display_mode(&self) -> crate::tui::ToolDisplayMode {
+        use crate::tui::ToolDisplayMode;
+        self.tool_display.unwrap_or_else(|| match self.no_tools {
+            Some(true) => ToolDisplayMode::Hidden,
+            Some(false) => ToolDisplayMode::Full,
+            None => ToolDisplayMode::default(),
+        })
+    }
+
+    pub fn show_thinking(&self) -> bool {
+        self.show_thinking.unwrap_or(false)
+    }
+
+    pub fn show_info(&self) -> bool {
+        self.show_info.unwrap_or(true)
+    }
+
+    pub fn edit_diffs(&self) -> bool {
+        self.edit_diffs.unwrap_or(false)
+    }
+}
+
 #[derive(Deserialize, Debug, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ResumeConfig {
@@ -345,4 +368,46 @@ pub fn load_config() -> Result<ConfigFile> {
             e
         ))
     })
+}
+
+#[cfg(test)]
+mod viewer_defaults_tests {
+    use super::*;
+    use crate::tui::ToolDisplayMode;
+
+    #[test]
+    fn fresh_config_uses_fork_wide_viewer_defaults() {
+        for config in ["", "[display]\n"] {
+            let parsed: ConfigFile = toml::from_str(config).unwrap();
+            let display = parsed.display.unwrap_or_default();
+            assert_eq!(display.tool_display_mode(), ToolDisplayMode::Off);
+            assert!(!display.show_thinking());
+            assert!(!display.edit_diffs()); // Footer action: diff·show.
+            assert!(display.show_info());
+        }
+        assert_eq!(ToolDisplayMode::default(), ToolDisplayMode::Off);
+    }
+
+    #[test]
+    fn explicit_config_overrides_fork_defaults() {
+        let config: ConfigFile = toml::from_str(
+            "[display]\ntool_display = \"truncated\"\nshow_thinking = true\nedit_diffs = true\nshow_info = false\n",
+        ).unwrap();
+        let display = config.display.unwrap();
+        assert_eq!(display.tool_display_mode(), ToolDisplayMode::Truncated);
+        assert!(display.show_thinking());
+        assert!(display.edit_diffs());
+        assert!(!display.show_info());
+    }
+
+    #[test]
+    fn legacy_tool_setting_still_works_but_explicit_mode_wins() {
+        let mut display = DisplayConfig::default();
+        display.no_tools = Some(true);
+        assert_eq!(display.tool_display_mode(), ToolDisplayMode::Hidden);
+        display.no_tools = Some(false);
+        assert_eq!(display.tool_display_mode(), ToolDisplayMode::Full);
+        display.tool_display = Some(ToolDisplayMode::Off);
+        assert_eq!(display.tool_display_mode(), ToolDisplayMode::Off);
+    }
 }

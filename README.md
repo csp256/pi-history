@@ -4,6 +4,10 @@ Fork of [brrock/pi-history](https://github.com/brrock/pi-history) with a fourth
 tool display mode, **off**, which hides tool calls, results, and summaries.
 Pi session names (`session_info`) are also shown in the session picker and searchable.
 
+Fork-wide viewer defaults: **tools off · thinking off · diff show · info on**.
+`diff show` is an action label: diff bodies stay hidden until you press `d`.
+Explicit CLI flags and config settings override these defaults.
+
 Press `t` to cycle modes, run `pi-history --tool-display off`, or set
 `tool_display = "off"` under `[display]` in `~/.config/pi-history/config.toml`.
 
@@ -329,17 +333,18 @@ Options:
 
 ### Showing tool calls
 
-In the TUI viewer, tool calls default to **truncated** mode — showing tool
-headers plus the first few body lines with a "(N more lines...)" indicator.
-Press `t` to cycle through modes: truncated → full → summary → off.
-Off hides tool calls, results, and summaries. Click a truncated tool call/result to expand that specific output, and click it again to collapse
-it. Use `--show-tools` (or `-t`) to start in full mode, or `--no-tools` to start
-in summary mode. Use `--tool-display off` to hide tools entirely.
+In the TUI viewer, tools default to **off**, hiding tool calls, results, and
+summaries. Press `t` to cycle through modes: off → truncated → full → summary.
+Truncated mode shows tool headers plus the first few body lines with a
+"(N more lines...)" indicator. Click a truncated tool call/result to expand that
+specific output, and click it again to collapse it. Use `--show-tools` (or `-t`)
+to start in full mode, or `--no-tools` to start in summary mode.
+Use `--tool-display off` to hide tools explicitly.
 
 ### Showing thinking blocks
 
 Extended thinking models include reasoning steps in their output. Thinking is
-shown by default. Use `--hide-thinking` (or press `T` in the TUI) to hide
+hidden by default. Use `--show-thinking` (or press `T` in the TUI) to show
 thinking blocks.
 
 ### Resuming conversations
@@ -460,17 +465,17 @@ Create the config file:
 mkdir -p ~/.config/pi-history
 cat > ~/.config/pi-history/config.toml << 'EOF'
 [display]
-# Tool display: true = summary, false = full (default: unset = truncated)
+# Legacy tool display: true = summary, false = full (default: unset = off)
 # no_tools = false
 # tool_display = "off"  # off, summary, truncated, or full
 
 # Show last messages in TUI preview (default: true)
 # last = true
 
-# Show thinking blocks (default: true)
-show_thinking = true
+# Show thinking blocks (default: false)
+show_thinking = false
 
-# Show timestamps in the viewer (info toggle; default: false)
+# Show timestamps in the viewer (info toggle; default: true)
 # show_info = true
 
 # Show old/new diffs in edit tool calls (default: false; press d in viewer)
@@ -511,14 +516,14 @@ EOF
 #### Display options
 
 - `tool_display` (string): `"off"`, `"summary"`, `"truncated"`, or `"full"`. Takes
-  precedence over `no_tools`. Set `tool_display = "off"` to hide all tool activity.
+  precedence over `no_tools`. Defaults to `"off"`, hiding all tool activity.
 - `no_tools` (boolean): When `true`, shows tool summaries; when `false`, shows
-  full tool details; when unset, starts in truncated tool-details mode
+  full tool details; when unset, defaults to off unless `tool_display` is set
 - `last` (boolean): Show last messages instead of first in TUI preview (default:
   true)
 - `show_thinking` (boolean): Show thinking blocks in conversation output
-  (default: true)
-- `show_info` (boolean): Show timestamps in the viewer (the `i` / info toggle; default: false).
+  (default: false)
+- `show_info` (boolean): Show timestamps in the viewer (the `i` / info toggle; default: true).
 - `edit_diffs` (boolean): Show old/new diffs in edit tool calls (default: false; press `d` in the viewer to toggle)
 - `plain` (boolean): Output plain text without ledger formatting (default:
   false)
