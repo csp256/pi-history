@@ -52,8 +52,13 @@ const TRUNCATED_RESULT_LINES: usize = 4;
 pub struct ToolOutputId(pub String);
 
 /// Controls how tool calls and results are displayed
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
 pub enum ToolDisplayMode {
+    /// Hide all tool calls, results, and summaries.
+    Off,
+    #[serde(rename = "summary")]
+    #[value(name = "summary")]
     Hidden,
     #[default]
     Truncated,
@@ -61,10 +66,11 @@ pub enum ToolDisplayMode {
 }
 
 impl ToolDisplayMode {
-    /// Cycle to the next mode: Truncated → Full → Summary → Truncated
+    /// Cycle to the next mode: Truncated → Full → Summary → Off → Truncated
     pub fn next(self) -> Self {
         match self {
-            Self::Hidden => Self::Truncated,
+            Self::Off => Self::Truncated,
+            Self::Hidden => Self::Off,
             Self::Truncated => Self::Full,
             Self::Full => Self::Hidden,
         }
@@ -76,7 +82,7 @@ impl ToolDisplayMode {
 
     /// Whether full or truncated tool details should be rendered
     pub fn shows_details(self) -> bool {
-        !matches!(self, Self::Hidden)
+        matches!(self, Self::Truncated | Self::Full)
     }
 
     /// Whether tools should be included in exported text
@@ -87,6 +93,7 @@ impl ToolDisplayMode {
     /// Fixed-width label for the status bar (3 chars each)
     pub fn status_label(self) -> &'static str {
         match self {
+            Self::Off => "off",
             Self::Hidden => "sum",
             Self::Truncated => "trn",
             Self::Full => "all",

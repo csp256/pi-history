@@ -5,8 +5,8 @@ edition = "2024"
 description = "Fuzzy-search Pi coding agent conversation history from the terminal."
 readme = "README.md"
 license = "MIT"
-repository = "https://github.com/brrock/pi-history"
-homepage = "https://github.com/brrock/pi-history"
+repository = "https://github.com/csp256/pi-history"
+homepage = "https://github.com/csp256/pi-history"
 keywords = ["pi", "pi-code", "fzf", "cli", "history"]
 categories = ["command-line-utilities"]
 

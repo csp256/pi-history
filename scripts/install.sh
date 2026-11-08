@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # pi-history installation script
-# Usage: curl -fsSL https://raw.githubusercontent.com/brrock/pi-history/main/scripts/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/csp256/pi-history/main/scripts/install.sh | bash
 #
 # Environment variables:
 #   PI_HISTORY_VERSION      - Pin a specific version (e.g., v0.1.13)
@@ -90,7 +90,7 @@ install_from_release() {
 
 	if [ -z "$version" ]; then
 		log_info "Fetching latest release..."
-		local latest_url="https://api.github.com/repos/brrock/pi-history/releases/latest"
+		local latest_url="https://api.github.com/repos/csp256/pi-history/releases/latest"
 		local release_json
 
 		if command -v curl &>/dev/null; then
@@ -119,7 +119,7 @@ install_from_release() {
 
 	# Download URL
 	local archive_name="pi-history-${platform}.tar.gz"
-	local download_url="https://github.com/brrock/pi-history/releases/download/${version}/${archive_name}"
+	local download_url="https://github.com/csp256/pi-history/releases/download/${version}/${archive_name}"
 
 	log_info "Downloading $archive_name..."
 
@@ -147,7 +147,7 @@ install_from_release() {
 	# Download and verify checksum
 	log_info "Verifying checksum..."
 	local checksum_file="pi-history-${platform}.sha256"
-	local checksum_url="https://github.com/brrock/pi-history/releases/download/${version}/${checksum_file}"
+	local checksum_url="https://github.com/csp256/pi-history/releases/download/${version}/${checksum_file}"
 
 	if command -v curl &>/dev/null; then
 		if ! curl -fsSL --retry 3 --retry-connrefused --connect-timeout 10 --max-time 30 -o "$checksum_file" "$checksum_url"; then
@@ -280,7 +280,7 @@ verify_installation() {
 	echo "  pi-history        # browse conversation history"
 	echo "  pi-history --help # see all options"
 	echo ""
-	echo "Documentation: https://github.com/brrock/pi-history"
+	echo "Documentation: https://github.com/csp256/pi-history"
 	echo ""
 }
 

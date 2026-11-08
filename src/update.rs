@@ -2,7 +2,7 @@ use crate::error::{AppError, Result};
 use std::path::Path;
 use std::process::Command;
 
-const REPO: &str = "brrock/pi-history";
+const REPO: &str = "csp256/pi-history";
 const BIN_NAME: &str = "pi-history";
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 

@@ -131,6 +131,8 @@ mode = "vector"
 #[serde(deny_unknown_fields)]
 pub struct DisplayConfig {
     pub no_tools: Option<bool>,
+    /// Tool display mode; takes precedence over the legacy no_tools setting.
+    pub tool_display: Option<crate::tui::ToolDisplayMode>,
     pub last: Option<bool>,
     /// Deprecated: timestamps now always use hybrid relative/absolute format.
     /// Kept for backwards compatibility with existing config files.

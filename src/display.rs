@@ -18,6 +18,8 @@ use std::path::Path;
 pub struct DisplayOptions {
     /// Hide tool calls and results
     pub no_tools: bool,
+    /// Tool display mode for ledger rendering
+    pub tool_display: crate::tui::ToolDisplayMode,
     /// Show thinking/reasoning blocks
     pub show_thinking: bool,
     /// Debug level for error logging
@@ -899,11 +901,7 @@ pub fn render_to_terminal(file_path: &Path, options: &DisplayOptions) -> Result<
     let content_width = terminal_width.saturating_sub(NAME_WIDTH + SEPARATOR_WIDTH);
 
     let render_options = RenderOptions {
-        tool_display: if options.no_tools {
-            crate::tui::ToolDisplayMode::Hidden
-        } else {
-            crate::tui::ToolDisplayMode::Full
-        },
+        tool_display: options.tool_display,
         show_thinking: options.show_thinking,
         show_timing: false, // Non-TUI render doesn't support timing toggle
         content_width,

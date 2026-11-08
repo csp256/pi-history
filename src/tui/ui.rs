@@ -1316,7 +1316,7 @@ fn render_help_overlay(
             ("G / End".into(), "Jump to bottom"),
             ("/".into(), "Search"),
             ("n / N".into(), "Next / prev match"),
-            ("t".into(), "Cycle tools: off/trunc/full"),
+            ("t".into(), "Cycle tools: summary/off/trunc/full"),
             ("d".into(), "Toggle edit diffs"),
             ("T".into(), "Toggle thinking"),
             ("i".into(), "Toggle timing"),

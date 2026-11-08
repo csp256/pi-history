@@ -104,18 +104,15 @@ fn run() -> Result<()> {
     let keys = config::KeyBindings::from_config(config.keys);
 
     // Use positive names internally for clarity
-    let show_tools = resolve_bool_setting(
-        args.show_tools,
-        args.no_tools,
-        display_config.no_tools.map(|b| !b),
-        true, // Default: render tools
-    );
-    // Map CLI flag to ToolDisplayMode
-    // --show-tools → Full, --no-tools → Hidden, default → Truncated details
-    let tool_display = if args.show_tools {
+    // Explicit CLI flags override config; tool_display supersedes legacy no_tools.
+    let tool_display = if let Some(mode) = args.tool_display {
+        mode
+    } else if args.show_tools {
         tui::ToolDisplayMode::Full
     } else if args.no_tools {
         tui::ToolDisplayMode::Hidden
+    } else if let Some(mode) = display_config.tool_display {
+        mode
     } else {
         match display_config.no_tools {
             Some(true) => tui::ToolDisplayMode::Hidden,
@@ -123,6 +120,7 @@ fn run() -> Result<()> {
             None => tui::ToolDisplayMode::Truncated,
         }
     };
+    let show_tools = tool_display.shows_details();
     let show_last = resolve_bool_setting(args.last, args.first, display_config.last, true);
     let show_thinking = resolve_bool_setting(
         args.show_thinking,
@@ -264,6 +262,7 @@ fn run() -> Result<()> {
     if let Some(ref render_path) = args.render {
         let display_options = display::DisplayOptions {
             no_tools: !show_tools,
+            tool_display,
             show_thinking,
             debug_level: args.debug,
             use_pager,
@@ -413,6 +412,7 @@ fn run() -> Result<()> {
     // Display the selected conversation
     let display_options = display::DisplayOptions {
         no_tools: !show_tools,
+        tool_display,
         show_thinking,
         debug_level: args.debug,
         use_pager,

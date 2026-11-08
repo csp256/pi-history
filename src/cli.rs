@@ -240,9 +240,13 @@ pub struct Args {
     #[arg(long, short = 't', group = "tools_display")]
     pub show_tools: bool,
 
-    /// Hide tool calls from the conversation output
+    /// Show tool summaries in the TUI (use --tool-display off to hide everything)
     #[arg(long, group = "tools_display")]
     pub no_tools: bool,
+
+    /// Tool display mode: off, summary, truncated, or full
+    #[arg(long, value_enum, group = "tools_display")]
+    pub tool_display: Option<crate::tui::ToolDisplayMode>,
 
     /// Show the conversation directory and exit
     #[arg(

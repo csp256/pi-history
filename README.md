@@ -1,4 +1,16 @@
 # pi-history
+
+Fork of [brrock/pi-history](https://github.com/brrock/pi-history) with a fourth
+tool display mode, **off**, which hides tool calls, results, and summaries.
+Press `t` to cycle modes, run `pi-history --tool-display off`, or set
+`tool_display = "off"` under `[display]` in `~/.config/pi-history/config.toml`.
+
+Build this fork from source (no fork release binaries are published yet):
+
+```sh
+cargo install --git https://github.com/csp256/pi-history --locked
+```
+
 > This is mostly based on the brillant, [claude-history](https://github.com/raine/claude-history), but modified to work with pi and other changes.
 <img src="/meta/screenshot.webp" />
 
@@ -42,7 +54,7 @@ discover the matching transcript folder automatically.
 ### Quick install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/brrock/pi-history/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/csp256/pi-history/main/scripts/install.sh | bash
 ```
 
 
@@ -109,7 +121,7 @@ the preview.
 | `/`            | Start search                                       |
 | `n`            | Next search match                                  |
 | `N`            | Previous search match                              |
-| `t`            | Cycle tools: summary/truncated/full                |
+| `t`            | Cycle tools: summary/off/truncated/full            |
 | `d`            | Toggle edit diffs                                  |
 | `T`            | Toggle thinking                                    |
 | `e`            | Export conversation to file                        |
@@ -218,7 +230,7 @@ conversations in a ledger-style format with scrolling support.
   mouse wheel
 - **Search**: Press `/` to search within the conversation, then `n`/`N` to
   navigate matches
-- **Cycle tools**: Press `t` to cycle tool display (summary → truncated → full)
+- **Cycle tools**: Press `t` to cycle tool display (summary → off → truncated → full)
 - **Toggle edit diffs**: Press `d` to show/hide full old/new edit diff bodies
 - **Toggle thinking**: Press `T` to show/hide thinking blocks
 - **Show path**: Press `p` to display the conversation file path
@@ -284,7 +296,8 @@ Arguments:
 
 Options:
   -t, --show-tools       Show tool calls in the conversation output
-      --no-tools         Hide tool calls from the conversation output
+      --no-tools         Show tool summaries in the TUI
+      --tool-display MODE  Tool display: off, summary, truncated, full
   -d, --show-dir         Print the conversation directory path and exit
   -l, --last             Show the last messages in the TUI preview (default)
       --first            Show the first messages in the TUI preview
@@ -316,10 +329,10 @@ Options:
 
 In the TUI viewer, tool calls default to **truncated** mode — showing tool
 headers plus the first few body lines with a "(N more lines...)" indicator.
-Press `t` to cycle through modes: truncated → full → summary. Click a truncated
-tool call/result to expand that specific output, and click it again to collapse
+Press `t` to cycle through modes: truncated → full → summary → off.
+Off hides tool calls, results, and summaries. Click a truncated tool call/result to expand that specific output, and click it again to collapse
 it. Use `--show-tools` (or `-t`) to start in full mode, or `--no-tools` to start
-in summary mode.
+in summary mode. Use `--tool-display off` to hide tools entirely.
 
 ### Showing thinking blocks
 
@@ -447,6 +460,7 @@ cat > ~/.config/pi-history/config.toml << 'EOF'
 [display]
 # Tool display: true = summary, false = full (default: unset = truncated)
 # no_tools = false
+# tool_display = "off"  # off, summary, truncated, or full
 
 # Show last messages in TUI preview (default: true)
 # last = true
@@ -491,6 +505,8 @@ EOF
 
 #### Display options
 
+- `tool_display` (string): `"off"`, `"summary"`, `"truncated"`, or `"full"`. Takes
+  precedence over `no_tools`. Set `tool_display = "off"` to hide all tool activity.
 - `no_tools` (boolean): When `true`, shows tool summaries; when `false`, shows
   full tool details; when unset, starts in truncated tool-details mode
 - `last` (boolean): Show last messages instead of first in TUI preview (default:
@@ -541,7 +557,7 @@ are key combinations like `"ctrl+r"`, `"alt+f"`, or `"f2"`.
 
 Each display option has opposing flags for explicit override:
 
-- `--no-tools` / `--show-tools`
+- `--tool-display off|summary|truncated|full` / `--no-tools` / `--show-tools`
 - `--last` / `--first`
 - `--hide-thinking` / `--show-thinking`
 - `--plain` (no opposite flag)

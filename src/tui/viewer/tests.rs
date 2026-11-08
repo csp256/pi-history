@@ -1409,3 +1409,72 @@ fn excluded_entry_kinds_produce_no_lines() {
     assert!(rendered.lines.is_empty());
     assert!(rendered.messages.is_empty());
 }
+
+#[test]
+fn off_tool_mode_hides_calls_results_summaries_and_expanded_outputs() {
+    let entries: Vec<RenderableEntry> = [
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Visible answer"},{"type":"tool_use","id":"call1","name":"Bash","input":{"command":"secret command"}},{"type":"thinking","thinking":"Visible reasoning"}]}}"#,
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call1","content":"secret result"},{"type":"text","text":"Visible question"}]}}"#,
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"call2","name":"Read","input":{"file_path":"secret path"}}]}}"#,
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call2","content":"another secret result"}]}}"#,
+        r#"{"type":"assistant","parent_tool_use_id":"parent","message":{"role":"assistant","content":[{"type":"tool_use","id":"call3","name":"Grep","input":{"pattern":"secret pattern"}}]}}"#,
+    ].into_iter().enumerate().map(|(entry_index, json)| RenderableEntry {
+        entry_index,
+        entry: serde_json::from_str(json).unwrap(),
+    }).collect();
+    let mut options = test_render_options(ToolDisplayMode::Off);
+    options.show_thinking = true;
+    // Expansions saved from another mode must not defeat Off.
+    options
+        .expanded_tool_outputs
+        .insert(make_tool_summary_output_id(2, None));
+    options.expanded_tool_outputs.insert(make_tool_output_id(
+        0,
+        None,
+        1,
+        ToolOutputKind::ToolCall,
+        Some("call1"),
+    ));
+    let rendered = render_parsed_conversation(&entries, &options);
+    let text = rendered_text(&rendered);
+    assert!(text.contains("Visible answer"), "{text}");
+    assert!(text.contains("Visible question"), "{text}");
+    assert!(text.contains("Visible reasoning"), "{text}");
+    assert!(!text.contains("secret"), "{text}");
+    assert!(!text.contains("Bash"), "{text}");
+    assert!(!text.contains("Read"), "{text}");
+    assert!(!text.contains("Grep"), "{text}");
+    assert_eq!(rendered.messages.len(), 2);
+    assert!(!options.tool_display.is_summary());
+    assert!(!options.tool_display.shows_details());
+    assert!(!options.tool_display.is_visible());
+    assert_eq!(options.tool_display.status_label(), "off");
+}
+
+#[test]
+fn tool_display_config_accepts_all_four_modes() {
+    for (name, mode) in [
+        ("off", ToolDisplayMode::Off),
+        ("summary", ToolDisplayMode::Hidden),
+        ("truncated", ToolDisplayMode::Truncated),
+        ("full", ToolDisplayMode::Full),
+    ] {
+        let config: crate::config::ConfigFile =
+            toml::from_str(&format!("[display]\ntool_display = \"{name}\"\n")).unwrap();
+        assert_eq!(config.display.unwrap().tool_display, Some(mode));
+    }
+}
+
+#[test]
+fn tool_display_cli_accepts_off_and_rejects_conflicting_flags() {
+    use clap::Parser;
+    let args = crate::cli::Args::try_parse_from(["pi-history", "--tool-display", "off"]).unwrap();
+    assert_eq!(args.tool_display, Some(ToolDisplayMode::Off));
+    for flag in ["--no-tools", "--show-tools"] {
+        assert!(
+            crate::cli::Args::try_parse_from(["pi-history", "--tool-display", "off", flag])
+                .is_err()
+        );
+    }
+    assert!(crate::cli::Args::try_parse_from(["pi-history", "--tool-display", "invalid"]).is_err());
+}
