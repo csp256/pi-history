@@ -73,7 +73,7 @@ pub struct Conversation {
     pub parse_errors: Vec<ParseError>,
     /// Summary/title of the conversation (from type=summary JSONL entry)
     pub summary: Option<String>,
-    /// Custom session title set by user via /rename (from type=custom-title JSONL entry)
+    /// Custom session title (from Pi session_info or legacy custom-title entries)
     pub custom_title: Option<String>,
     /// Model name from assistant/model-change messages (e.g., "openai/gpt-5.4")
     pub model: Option<String>,

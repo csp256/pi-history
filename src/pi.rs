@@ -100,9 +100,10 @@ pub enum LogEntry {
         #[serde(flatten)]
         extra: serde_json::Value,
     },
-    #[serde(rename = "custom-title")]
+    // Pi uses session_info/name; retain the legacy custom-title format too.
+    #[serde(rename = "custom-title", alias = "session_info")]
     CustomTitle {
-        #[serde(rename = "customTitle")]
+        #[serde(default, rename = "customTitle", alias = "name")]
         custom_title: String,
     },
     #[serde(rename = "ai-title")]

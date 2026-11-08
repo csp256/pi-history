@@ -1307,6 +1307,54 @@ mod tests {
         assert_eq!(conv.total_tokens, 0, "Should have zero tokens");
     }
 
+    // === Pi session names ===
+
+    #[test]
+    fn extracts_pi_session_name_for_picker_and_search() {
+        let content = [
+            r#"{"type":"session","id":"abc","cwd":"/tmp/project"}"#.to_string(),
+            user_msg("Hello", None),
+            assistant_msg("Hi there"),
+            r#"{"type":"session_info","id":"info1","parentId":"msg1","timestamp":"2026-01-01T00:00:00Z","name":"  My named Pi session  "}"#.to_string(),
+        ].join("\n");
+        let conv = parse_jsonl(&content).unwrap().unwrap();
+        assert_eq!(conv.custom_title.as_deref(), Some("My named Pi session"));
+        assert!(conv.full_text.contains("My named Pi session"));
+        assert!(conv.parse_errors.is_empty());
+    }
+
+    #[test]
+    fn latest_session_name_wins_across_pi_and_legacy_records() {
+        let content = [
+            user_msg("Hello", None),
+            r#"{"type":"custom-title","customTitle":"Legacy name"}"#.to_string(),
+            r#"{"type":"session_info","name":"First Pi name"}"#.to_string(),
+            r#"{"type":"session_info","name":"Renamed in Pi"}"#.to_string(),
+        ]
+        .join("\n");
+        let conv = parse_jsonl(&content).unwrap().unwrap();
+        assert_eq!(conv.custom_title.as_deref(), Some("Renamed in Pi"));
+    }
+
+    #[test]
+    fn empty_or_missing_pi_session_name_clears_previous_name() {
+        for record in [
+            r#"{"type":"session_info","name":""}"#,
+            r#"{"type":"session_info","name":"  "}"#,
+            r#"{"type":"session_info"}"#,
+        ] {
+            let content = [
+                user_msg("Hello", None),
+                r#"{"type":"session_info","name":"Old name"}"#.to_string(),
+                record.to_string(),
+            ]
+            .join("\n");
+            let conv = parse_jsonl(&content).unwrap().unwrap();
+            assert_eq!(conv.custom_title, None, "{record}");
+            assert!(conv.parse_errors.is_empty());
+        }
+    }
+
     // === Custom title extraction ===
 
     #[test]

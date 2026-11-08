@@ -2,6 +2,8 @@
 
 Fork of [brrock/pi-history](https://github.com/brrock/pi-history) with a fourth
 tool display mode, **off**, which hides tool calls, results, and summaries.
+Pi session names (`session_info`) are also shown in the session picker and searchable.
+
 Press `t` to cycle modes, run `pi-history --tool-display off`, or set
 `tool_display = "off"` under `[display]` in `~/.config/pi-history/config.toml`.
 
