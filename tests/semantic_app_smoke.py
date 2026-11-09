@@ -27,12 +27,14 @@ with tempfile.TemporaryDirectory() as temp:
         assert 'source=semantic' in result.stdout,result.stdout
         assert 'GetElementType' not in result.stderr,result.stderr
         print('PASS CLI',mode,flush=True)
-    for query_text,title,evidence in [('question about isovis','Isovis implementation','vanilla'),('cli command for counting lines','Counting source lines','lines --depth 2 -d')]:
+    for query_text,title,evidence in [('question about isovis','Isovis implementation','vanilla'),('cli command for counting lines','Counting source lines','lines --depth 2 -d'),('command line tool about file lengths','Counting source lines','lines --depth 2 -d'),('question and answer about isovis','Isovis implementation','vanilla')]:
         result=subprocess.run([binary,'agent','search',query_text,'--semantic','--top','1'],env=env,text=True,capture_output=True,timeout=40)
         assert result.returncode==0,(result.stdout,result.stderr)
         assert title in result.stdout and evidence in result.stdout,(result.stdout,result.stderr)
         assert 'Goal-mode rules' not in result.stdout,result.stdout
         print('PASS natural-language retrieval:',query_text,flush=True)
+    # Force a cold TUI index: CLI checks above must not mask fake prewarming.
+    (home/'.cache/pi-history/semantic/embeddings-v1.bin').unlink(missing_ok=True)
     screen=pyte.Screen(150,30);stream=pyte.Stream(screen)
     master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',30,150,0,0))
     proc=subprocess.Popen([binary],env=env,stdin=slave,stdout=slave,stderr=slave);os.close(slave)
@@ -45,11 +47,45 @@ with tempfile.TemporaryDirectory() as temp:
                 except OSError:break
         return '\n'.join(screen.display)
     try:
-        read(4);os.write(master,query.encode());text=read(4)
+        deadline=time.monotonic()+45
+        while not (home/'.cache/pi-history/semantic/embeddings-v1.bin').exists() and time.monotonic()<deadline:
+            read(.2)
+        assert (home/'.cache/pi-history/semantic/embeddings-v1.bin').exists(), '\n'.join(screen.display)
+        print('PASS genuine cold-index TUI prewarm before any query',flush=True)
+        os.write(master,query.encode());text=read(4)
         assert 'Persistent authentication' in text,text
         assert 'sem failed' not in text,text
         assert 'GetElementType' not in ''.join(raw),''.join(raw)
         print('PASS TUI startup/prewarm and live semantic query',flush=True)
+        os.write(master,b'\x03');proc.wait(timeout=5)
+    finally:
+        if proc.poll() is None:proc.terminate();proc.wait(timeout=5)
+        os.close(master)
+
+    # Keep valid target embeddings, then introduce enough uncached long passages
+    # that waiting for a full rebuild would visibly stall interactive searching.
+    for index in range(64):
+        text=('Gardening involves preparing soil, watering seedlings, selecting seasonal flowers, and protecting fruit trees from frost. '*35)
+        entries=[{'type':'session','id':f'garden-{index}','cwd':str(home),'timestamp':'2026-11-09T11:00:00Z'},{'type':'session_info','name':f'Garden {index}'},{'type':'message','id':'g1','message':{'role':'user','content':[{'type':'text','text':text}]}}]
+        (sessions/f'garden-{index}.jsonl').write_text('\n'.join(map(json.dumps,entries))+'\n')
+    screen=pyte.Screen(150,30);stream=pyte.Stream(screen);raw=[]
+    master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',30,150,0,0))
+    proc=subprocess.Popen([binary],env=env,stdin=slave,stdout=slave,stderr=slave);os.close(slave)
+    try:
+        read(.3)
+        previous=''
+        for phrase,title,other in [('question and answer about isovis','Isovis implementation','Counting source lines'),('command line tool about file lengths','Counting source lines','Isovis implementation')]:
+            os.write(master,b'\x7f'*len(previous)+phrase.encode())
+            deadline=time.monotonic()+30
+            while time.monotonic()<deadline:
+                text=read(.1)
+                if phrase in text and 'partial results' in text and title in text and (other not in text or text.index(title)<text.index(other)):
+                    break
+            else:
+                raise AssertionError('No responsive partial results for '+phrase+'\n'+text)
+            assert 'sem failed' not in text,text
+            print('PASS responsive partial search during indexing:',phrase,flush=True)
+            previous=phrase
         os.write(master,b'\x03');proc.wait(timeout=5)
     finally:
         if proc.poll() is None:proc.terminate();proc.wait(timeout=5)

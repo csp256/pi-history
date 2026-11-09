@@ -234,6 +234,13 @@ prefixes. Old parsed-history and embedding caches are refreshed automatically;
 **the first semantic search after updating may need time to rebuild its index**.
 No history/cache deletion or model re-download is needed.
 
+A large first index can take a while on CPU. During a rebuild the TUI shows
+valid cached matches immediately, explicitly labeled **partial results**, while
+indexing continues. Changing the query interrupts indexing at the next small
+batch; completed batches remain cached. Switching modes clears the other
+backend's rows rather than presenting old lexical matches as semantic results.
+Entering semantic mode with an empty query genuinely prewarms the index.
+
 Model-backed checks are opt-in (ordinary tests do not download models):
 
 - `just semantic-smoke` tests actual embeddings and relevant-vs-unrelated ranking;

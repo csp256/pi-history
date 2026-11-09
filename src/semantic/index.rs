@@ -203,6 +203,66 @@ impl SemanticIndexState {
         })
     }
 
+    /// Rank valid cached chunks now; missing passages must not block all results.
+    /// The caller continues indexing and replaces these explicitly partial hits.
+    pub fn rank_cached(
+        &self,
+        request: &SemanticIndexRequest<'_>,
+        embedder: &mut dyn SemanticEmbedder,
+        cancellation: &SemanticCancellationToken,
+    ) -> Result<Option<SemanticIndexResponse>> {
+        if request.prewarm || self.signature_matches(request) {
+            return Ok(None);
+        }
+        let Some(vector) = embedder.embed_query(request.query)? else {
+            return Ok(None);
+        };
+        Self::rank_cached_snapshot(
+            request,
+            &self.cache,
+            self.chunk_config,
+            &vector,
+            cancellation,
+        )
+    }
+
+    pub fn rank_cached_snapshot(
+        request: &SemanticIndexRequest<'_>,
+        cache: &EmbeddingCache,
+        config: ChunkConfig,
+        vector: &[f32],
+        cancellation: &SemanticCancellationToken,
+    ) -> Result<Option<SemanticIndexResponse>> {
+        let (mut cached, missing) = crate::semantic::cache::cached_chunks(
+            full_corpus_chunks(request, config),
+            cache,
+            cancellation,
+        )?;
+        if cached.is_empty() || missing == 0 {
+            return Ok(None);
+        }
+        let indexed_chunk_count = cached.len();
+        let scope = request
+            .scope
+            .iter()
+            .map(|candidate| (candidate.index, candidate.source))
+            .collect::<HashSet<_>>();
+        cached.retain(|chunk| scope.contains(&(chunk.conversation_index, chunk.source)));
+        let cached = filter_chunks_by_literals(cached, request.literal_filters);
+        let hits = rank_chunks(request.query, vector, &cached, cancellation)?;
+        Ok(Some(SemanticIndexResponse {
+            hits,
+            chunk_hits: Vec::new(),
+            indexed_chunk_count,
+            query_embedding_returned: true,
+            progress: SemanticIndexProgress::Embedding {
+                completed: 0,
+                total: missing,
+            },
+            prewarm: false,
+        }))
+    }
+
     pub fn rank_refreshed(
         &self,
         request: &SemanticIndexRequest<'_>,
@@ -553,6 +613,54 @@ mod tests {
                 conversation: Arc::new(conversation),
             })
             .collect()
+    }
+
+    #[test]
+    fn cached_results_are_ranked_without_waiting_for_missing_passages() {
+        let candidates = candidates_from(&[
+            conversation("/cached.jsonl", vec!["visible alpha"]),
+            conversation("/missing.jsonl", vec!["visible beta"]),
+        ]);
+        let request = index_request("alpha", &candidates);
+        let mut cache = crate::semantic::cache::empty_embedding_cache(ChunkConfig::default());
+        let first = full_corpus_chunks(&request, ChunkConfig::default()).remove(0);
+        cache_passage(&mut cache, first.key, first.text, vec![1.0, 0.0]);
+        let mut state = SemanticIndexState::with_cache(ChunkConfig::default(), cache);
+        let mut embedder = FakeEmbedder::new();
+        let token = SemanticCancellationToken::new();
+        let partial = state
+            .rank_cached(&request, &mut embedder, &token)
+            .unwrap()
+            .unwrap();
+        assert_eq!(partial.hits[0].conversation_index, 0);
+        assert_eq!(
+            partial.progress,
+            SemanticIndexProgress::Embedding {
+                completed: 0,
+                total: 1
+            }
+        );
+        assert_eq!(embedder.passage_calls, 0);
+        assert_eq!(embedder.query_calls, 1);
+        let scoped = SemanticIndexRequest {
+            scope: &candidates[1..],
+            ..request
+        };
+        assert!(
+            state
+                .rank_cached(&scoped, &mut embedder, &token)
+                .unwrap()
+                .unwrap()
+                .hits
+                .is_empty()
+        );
+        cache_request_passages(&mut state.cache, &request);
+        assert!(
+            state
+                .rank_cached(&request, &mut embedder, &token)
+                .unwrap()
+                .is_none()
+        );
     }
 
     fn cache_request_passages(cache: &mut EmbeddingCache, request: &SemanticIndexRequest<'_>) {
@@ -1711,5 +1819,63 @@ mod tests {
                 .has_chunks(&request, &SemanticCancellationToken::new())
                 .unwrap()
         );
+    }
+}
+
+/// Read-only, opt-in diagnostic: evaluate query variants against all currently
+/// cached real-history chunks without forcing a potentially long full rebuild.
+#[cfg(test)]
+mod real_history_audit {
+    use super::*;
+    use crate::semantic::embed::SemanticEmbedder;
+
+    #[test]
+    #[ignore = "requires local history and cached model/embeddings"]
+    fn real_history_cached_retrieval_audit() {
+        let conversations = crate::history::load_all_conversations(true, None).unwrap();
+        let config = ChunkConfig::default();
+        let references = conversations.iter().collect::<Vec<_>>();
+        let chunks = crate::semantic::chunk::build_chunks(&references, config);
+        let cache = read_embedding_cache(config);
+        let cancellation = SemanticCancellationToken::new();
+        let (cached, missing) =
+            crate::semantic::cache::cached_chunks(chunks, &cache, &cancellation).unwrap();
+        eprintln!(
+            "AUDIT: {} conversations; {} matching cached chunks; {} not yet indexed",
+            conversations.len(),
+            cached.len(),
+            missing
+        );
+        assert!(
+            !cached.is_empty(),
+            "Populate the semantic cache before running this audit"
+        );
+        let mut model = crate::semantic::fastembed::FastembedEmbedder::new_quiet().unwrap();
+        for query in [
+            "question about isovis",
+            "question and answer about isovis",
+            "cli command for counting lines",
+            "command line tool about file lengths",
+        ] {
+            let vector = model.embed_query(query).unwrap().unwrap();
+            let hits = rank_chunks(query, &vector, &cached, &cancellation).unwrap();
+            eprintln!("AUDIT query: {query}");
+            for (rank, hit) in hits.iter().take(12).enumerate() {
+                let conversation = &conversations[hit.conversation_index];
+                let title = conversation
+                    .custom_title
+                    .as_deref()
+                    .or(conversation.summary.as_deref())
+                    .unwrap_or(&conversation.preview);
+                let title = title.chars().take(80).collect::<String>();
+                eprintln!(
+                    "AUDIT #{} {:.4} {} | {}",
+                    rank + 1,
+                    hit.hybrid_score,
+                    title,
+                    hit.snippet.chars().take(150).collect::<String>()
+                );
+            }
+        }
     }
 }

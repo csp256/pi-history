@@ -416,9 +416,11 @@ fn semantic_response_after_mode_toggle_is_ignored() {
     drop(request_rx);
     let semantic_generation = app.search_generation;
 
+    let (lexical_tx, lexical_rx) = mpsc::channel();
+    app.search_rx = lexical_rx;
     app.toggle_list_search_mode();
     assert_eq!(app.list_search_mode(), ListSearchMode::Lexical);
-    assert_eq!(filtered_projects(&app), vec![Some("Visible")]);
+    assert!(app.filtered.is_empty());
 
     response_tx
         .send(SemanticSearchMessage::Complete(
@@ -434,9 +436,19 @@ fn semantic_response_after_mode_toggle_is_ignored() {
         .unwrap();
 
     assert!(!app.receive_search_results());
-    assert_eq!(filtered_projects(&app), vec![Some("Visible")]);
+    assert!(app.filtered.is_empty());
     assert!(app.semantic_search.results.is_empty());
     assert_eq!(app.semantic_search.pending_generation, None);
+    lexical_tx
+        .send(SearchResponse {
+            filtered: vec![0],
+            generation: app.search_generation,
+            mode: ListSearchMode::Lexical,
+            evidence: HashMap::new(),
+        })
+        .unwrap();
+    assert!(app.receive_search_results());
+    assert_eq!(filtered_projects(&app), vec![Some("Visible")]);
 }
 
 #[test]
@@ -713,7 +725,7 @@ fn semantic_dispatch_after_loading_keeps_snapshot_aligned() {
 }
 
 #[test]
-fn semantic_keypress_preserves_browse_rows_while_pending() {
+fn semantic_keypress_clears_unsearched_browse_rows_while_pending() {
     let mut app = app_with_options(
         vec![conversation(
             Some("Visible"),
@@ -734,8 +746,8 @@ fn semantic_keypress_preserves_browse_rows_while_pending() {
     app.handle_key(KeyCode::Char('n'), KeyModifiers::NONE, 10);
 
     assert!(last_semantic_search(&drain_semantic_commands(&request_rx)).is_some());
-    assert_eq!(filtered_projects(&app), vec![Some("Visible")]);
-    assert_eq!(app.selected(), Some(0));
+    assert!(app.filtered.is_empty());
+    assert_eq!(app.selected(), None);
 }
 
 #[test]
@@ -847,7 +859,7 @@ fn semantic_request_uses_live_conversations_not_stale_snapshot() {
 }
 
 #[test]
-fn semantic_query_keeps_existing_metadata_while_pending() {
+fn semantic_query_clears_previous_query_metadata_while_pending() {
     let mut app = app_with_options(
         vec![conversation(
             Some("Visible"),
@@ -872,7 +884,7 @@ fn semantic_query_keeps_existing_metadata_while_pending() {
 
     let commands = drain_semantic_commands(&request_rx);
     assert!(last_semantic_search(&commands).is_some());
-    assert!(app.semantic_search.results.contains_key(&0));
+    assert!(app.semantic_search.results.is_empty());
 }
 
 #[test]
@@ -1287,7 +1299,8 @@ fn lexical_toggle_clears_semantic_error_and_pending_status() {
     assert_eq!(app.semantic_search.pending_generation, None);
     assert_eq!(app.semantic_search.pending_status, None);
     assert_eq!(app.semantic_search_error(), None);
-    assert_eq!(filtered_projects(&app), vec![Some("Visible")]);
+    assert!(app.filtered.is_empty());
+    assert!(app.search_in_flight);
 }
 
 #[test]
@@ -1362,8 +1375,8 @@ fn workspace_toggle_dispatches_new_semantic_request() {
     let commands = drain_semantic_commands(&request_rx);
     assert_eq!(last_semantic_scope(&commands).unwrap().2, vec![0]);
     assert_eq!(last_semantic_search(&commands).unwrap().1, "needle");
-    assert_eq!(filtered_projects(&app), vec![Some("Visible")]);
-    assert_eq!(app.selected(), Some(0));
+    assert!(app.filtered.is_empty());
+    assert_eq!(app.selected(), None);
     assert_eq!(app.semantic_search_error(), None);
 }
 
@@ -1602,4 +1615,115 @@ fn info_is_enabled_by_default_in_both_startup_modes() {
         panic!("expected single-file viewer");
     };
     assert!(state.show_timing);
+}
+
+#[test]
+fn toggling_modes_does_not_present_old_rows_as_new_backend_results() {
+    let mut app = app(
+        vec![
+            conversation(
+                Some("Visible"),
+                "-tmp-visible",
+                "11111111-1111-4111-8111-111111111111",
+                "needle",
+            ),
+            conversation(
+                Some("Other"),
+                "-tmp-other",
+                "22222222-2222-4222-8222-222222222222",
+                "different words",
+            ),
+        ],
+        vec![],
+    );
+    let (tx, _requests) = mpsc::channel();
+    let (_responses, rx) = mpsc::channel();
+    app.semantic_search.worker_tx = Some(tx);
+    app.semantic_search.worker_rx = Some(rx);
+    app.query = "needle".into();
+    app.apply_lexical_filter();
+    assert_eq!(app.filtered, vec![0]);
+    app.toggle_list_search_mode();
+    assert!(app.filtered.is_empty());
+    assert!(app.semantic_search.pending_generation.is_some());
+    assert_eq!(app.semantic_scope_indices().as_ref(), &vec![0, 1]);
+    // The reverse transition must not retain semantic results either.
+    app.apply_filtered(vec![0]);
+    app.toggle_list_search_mode();
+    assert!(app.filtered.is_empty());
+    assert!(app.search_in_flight);
+}
+
+#[test]
+fn partial_semantic_results_stay_pending_and_reject_old_generations() {
+    let mut app = app(
+        vec![conversation(
+            Some("Visible"),
+            "-tmp-visible",
+            "11111111-1111-4111-8111-111111111111",
+            "needle",
+        )],
+        vec![],
+    );
+    app.list_search_mode = ListSearchMode::Semantic;
+    app.query = "needle".into();
+    app.search_generation = 10;
+    app.semantic_search.pending_generation = Some(10);
+    app.apply_filtered(Vec::new());
+    let (tx, rx) = mpsc::channel();
+    app.semantic_search.worker_rx = Some(rx);
+    for generation in [9, 10] {
+        tx.send(SemanticSearchMessage::Partial(
+            crate::tui::semantic_worker::SemanticSearchResponse {
+                generation,
+                filtered: vec![0],
+                metadata: HashMap::from([(0, test_semantic_metadata(0, "cached needle"))]),
+                error: None,
+                progress: SemanticProgress::Embedding {
+                    completed: 0,
+                    total: 12,
+                },
+                prewarm: false,
+            },
+        ))
+        .unwrap();
+        assert_eq!(app.receive_search_results(), generation == 10);
+        assert_eq!(app.filtered.len(), usize::from(generation == 10));
+    }
+    assert_eq!(app.semantic_search.pending_generation, Some(10));
+    assert!(
+        app.semantic_activity_status_text()
+            .unwrap()
+            .contains("partial results")
+    );
+}
+
+#[test]
+fn streaming_results_preserve_selected_conversation_when_ranks_change() {
+    let mut app = app(
+        vec![
+            conversation(
+                Some("A"),
+                "-tmp-a",
+                "11111111-1111-4111-8111-111111111111",
+                "alpha",
+            ),
+            conversation(
+                Some("B"),
+                "-tmp-b",
+                "22222222-2222-4222-8222-222222222222",
+                "beta",
+            ),
+        ],
+        vec![],
+    );
+    let metadata = HashMap::from([
+        (0, test_semantic_metadata(0, "alpha")),
+        (1, test_semantic_metadata(1, "beta")),
+    ]);
+    app.apply_semantic_rows(vec![0, 1], metadata.clone());
+    app.selected = Some(1);
+    app.apply_semantic_rows(vec![1, 0], metadata);
+    assert_eq!(app.selected, Some(0));
+    assert_eq!(app.get_selected_conversation_index(), Some(1));
 }

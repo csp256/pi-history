@@ -13,7 +13,7 @@ use crate::semantic::types::{
     SemanticRationaleKind, SemanticScoreBreakdown,
 };
 use crate::tui::app::{SemanticProgress, SemanticResultMetadata};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::mpsc;
 
@@ -46,11 +46,18 @@ struct SemanticSearchRequest {
     prewarm: bool,
 }
 
+impl SemanticSearchRequest {
+    fn is_noop(&self) -> bool {
+        self.query.is_effectively_empty() && !self.prewarm
+    }
+}
+
 pub enum SemanticSearchMessage {
     Progress {
         generation: u64,
         progress: SemanticProgress,
     },
+    Partial(SemanticSearchResponse),
     Complete(SemanticSearchResponse),
 }
 
@@ -87,9 +94,10 @@ fn run_semantic_worker(
     let mut embedder: Option<FastembedEmbedder> = None;
     let mut cancellation = SemanticCancellationToken::new();
 
-    while let Ok(command) = cmd_rx.recv() {
+    let mut queued = VecDeque::new();
+    while let Some(command) = queued.pop_front().or_else(|| cmd_rx.recv().ok()) {
         let mut request = worker.apply_command(command, &cancellation);
-        while let Ok(pending) = cmd_rx.try_recv() {
+        while let Some(pending) = queued.pop_front().or_else(|| cmd_rx.try_recv().ok()) {
             if let Some(search) = worker.apply_command(pending, &cancellation) {
                 request = Some(search);
             }
@@ -111,7 +119,7 @@ fn run_semantic_worker(
         }
 
         cancellation = SemanticCancellationToken::new();
-        if request.query.is_effectively_empty() {
+        if request.is_noop() {
             let _ = res_tx.send(SemanticSearchMessage::Complete(SemanticSearchResponse {
                 generation: request.generation,
                 filtered: Vec::new(),
@@ -175,7 +183,12 @@ fn run_semantic_worker(
                     &mut state,
                     embedder.as_mut().unwrap(),
                     &cancellation,
-                    &res_tx,
+                    &mut SemanticWorkerIo {
+                        results: &res_tx,
+                        commands: &cmd_rx,
+                        queued: &mut queued,
+                        persist: write_embedding_cache,
+                    },
                 )
                 .unwrap_or_else(|error| {
                     failed_semantic_response(request.generation, request.prewarm, error.to_string())
@@ -318,26 +331,83 @@ impl SemanticWorkerState {
     }
 }
 
+struct SemanticWorkerIo<'a> {
+    results: &'a mpsc::Sender<SemanticSearchMessage>,
+    commands: &'a mpsc::Receiver<SemanticWorkerCommand>,
+    queued: &'a mut VecDeque<SemanticWorkerCommand>,
+    persist: fn(&crate::semantic::types::EmbeddingCache),
+}
+
 fn rank_or_prewarm_semantic_request(
     generation: u64,
     request: &SemanticIndexRequest<'_>,
     parsed: &ParsedQuery,
     state: &mut SemanticIndexState,
-    embedder: &mut FastembedEmbedder,
+    embedder: &mut dyn crate::semantic::embed::SemanticEmbedder,
     cancellation: &SemanticCancellationToken,
-    res_tx: &mpsc::Sender<SemanticSearchMessage>,
+    io: &mut SemanticWorkerIo<'_>,
 ) -> Result<SemanticSearchResponse> {
+    if let Some(cached) = state.rank_cached(request, embedder, cancellation)? {
+        let _ = io
+            .results
+            .send(SemanticSearchMessage::Partial(semantic_search_response(
+                generation,
+                cached,
+                request.full_corpus,
+                parsed,
+            )));
+    }
+    // Reuse a query vector to publish newly indexed matches too, including
+    // the first batch of a completely cold index. Do not wait for a new query.
+    let vector = if request.prewarm {
+        None
+    } else {
+        embedder.embed_query(request.query)?
+    };
+    let config = state.chunk_config;
+    let results = io.results;
+    let persist = io.persist;
+    let progress_state = std::cell::Cell::new(SemanticIndexProgress::CacheReady);
+    let mut last_update = None::<std::time::Instant>;
     let response = state.refresh_or_prewarm(
         request,
         embedder,
         cancellation,
         |progress| {
-            let _ = res_tx.send(SemanticSearchMessage::Progress {
+            progress_state.set(progress);
+            interrupt_for_queued_commands(io.commands, io.queued, cancellation);
+            let _ = results.send(SemanticSearchMessage::Progress {
                 generation,
                 progress: semantic_progress(progress),
             });
         },
-        write_embedding_cache,
+        |cache| {
+            persist(cache);
+            if cancellation.is_cancelled()
+                || last_update
+                    .is_some_and(|time| time.elapsed() < std::time::Duration::from_secs(2))
+            {
+                return;
+            }
+            if let Some(vector) = vector.as_deref()
+                && let Ok(Some(mut partial)) = SemanticIndexState::rank_cached_snapshot(
+                    request,
+                    cache,
+                    config,
+                    vector,
+                    cancellation,
+                )
+            {
+                partial.progress = progress_state.get();
+                let _ = results.send(SemanticSearchMessage::Partial(semantic_search_response(
+                    generation,
+                    partial,
+                    request.full_corpus,
+                    parsed,
+                )));
+                last_update = Some(std::time::Instant::now());
+            }
+        },
     )?;
     Ok(semantic_search_response(
         generation,
@@ -345,6 +415,28 @@ fn rank_or_prewarm_semantic_request(
         request.full_corpus,
         parsed,
     ))
+}
+
+// Poll between bounded embedding batches, rather than leaving new queries
+// stuck behind a full-history rebuild. Completed batches remain cached.
+fn interrupt_for_queued_commands(
+    rx: &mpsc::Receiver<SemanticWorkerCommand>,
+    queued: &mut VecDeque<SemanticWorkerCommand>,
+    cancellation: &SemanticCancellationToken,
+) {
+    loop {
+        match rx.try_recv() {
+            Ok(command) => queued.push_back(command),
+            Err(mpsc::TryRecvError::Empty) => break,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                cancellation.cancel();
+                break;
+            }
+        }
+    }
+    if !queued.is_empty() {
+        cancellation.cancel();
+    }
 }
 
 fn semantic_search_response(
@@ -594,6 +686,75 @@ mod tests {
         }
     }
 
+    #[test]
+    fn completely_cold_index_publishes_first_batch_before_finishing() {
+        struct Fake {
+            passage_calls: usize,
+        }
+        impl crate::semantic::embed::SemanticEmbedder for Fake {
+            fn embed_passages(&mut self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+                self.passage_calls += 1;
+                Ok(texts.iter().map(|_| vec![1.0, 0.0]).collect())
+            }
+            fn embed_query(&mut self, _: &str) -> Result<Option<Vec<f32>>> {
+                Ok(Some(vec![1.0, 0.0]))
+            }
+        }
+        let candidates = (0..9)
+            .map(|index| SemanticIndexCandidate {
+                index,
+                source: crate::semantic::types::SemanticChunkSource::VisibleDialogue,
+                conversation: Arc::new(conversation(
+                    &format!("/cold-{index}.jsonl"),
+                    vec!["visible alpha"],
+                )),
+            })
+            .collect::<Vec<_>>();
+        let parsed = ParsedQuery::parse("alpha");
+        let request = SemanticIndexRequest {
+            query: "alpha",
+            literal_filters: &[],
+            full_corpus: &candidates,
+            scope: &candidates,
+            corpus_version: 1,
+            prewarm: false,
+        };
+        let config = crate::semantic::types::ChunkConfig::default();
+        let mut state = SemanticIndexState::with_cache(
+            config,
+            crate::semantic::cache::empty_embedding_cache(config),
+        );
+        let mut fake = Fake { passage_calls: 0 };
+        let (result_tx, result_rx) = mpsc::channel();
+        let (_command_tx, command_rx) = mpsc::channel();
+        let mut queued = VecDeque::new();
+        let full = rank_or_prewarm_semantic_request(
+            1,
+            &request,
+            &parsed,
+            &mut state,
+            &mut fake,
+            &SemanticCancellationToken::new(),
+            &mut SemanticWorkerIo {
+                results: &result_tx,
+                commands: &command_rx,
+                queued: &mut queued,
+                persist: |_| {},
+            },
+        )
+        .unwrap();
+        assert_eq!(full.filtered.len(), 9);
+        assert_eq!(fake.passage_calls, 2);
+        let partials = result_rx
+            .try_iter()
+            .filter_map(|message| match message {
+                SemanticSearchMessage::Partial(response) => Some(response.filtered.len()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(partials, vec![8]);
+    }
+
     fn corpus(conversations: Vec<Conversation>) -> Arc<Vec<Arc<Conversation>>> {
         Arc::new(conversations.into_iter().map(Arc::new).collect())
     }
@@ -673,6 +834,7 @@ mod tests {
             .expect("empty response");
 
         match message {
+            SemanticSearchMessage::Partial(_) => panic!("unexpected partial response"),
             SemanticSearchMessage::Complete(response) => {
                 assert!(response.filtered.is_empty());
                 assert!(response.metadata.is_empty());
@@ -715,6 +877,7 @@ mod tests {
             .expect("empty response");
 
         match message {
+            SemanticSearchMessage::Partial(_) => panic!("unexpected partial response"),
             SemanticSearchMessage::Complete(response) => {
                 assert!(response.filtered.is_empty());
                 assert!(response.metadata.is_empty());
@@ -759,6 +922,7 @@ mod tests {
                 .expect("prewarm response")
             {
                 SemanticSearchMessage::Progress { .. } => continue,
+                SemanticSearchMessage::Partial(_) => panic!("unexpected partial response"),
                 SemanticSearchMessage::Complete(response) => {
                     assert!(response.prewarm);
                     assert!(response.filtered.is_empty());
@@ -801,6 +965,7 @@ mod tests {
             .expect("literal response");
 
         match message {
+            SemanticSearchMessage::Partial(_) => panic!("unexpected partial response"),
             SemanticSearchMessage::Complete(response) => {
                 assert_eq!(response.filtered, vec![0]);
                 assert!(
@@ -851,6 +1016,7 @@ mod tests {
             .recv_timeout(Duration::from_secs(2))
             .expect("literal response")
         {
+            SemanticSearchMessage::Partial(_) => panic!("unexpected partial response"),
             SemanticSearchMessage::Complete(response) => {
                 assert_eq!(response.filtered, vec![1, 0]);
                 assert!(
@@ -940,5 +1106,58 @@ mod tests {
             worker.version_state_for(&request),
             Some(VersionState::Stale)
         ));
+    }
+}
+
+#[cfg(test)]
+mod prewarm_regressions {
+    use super::*;
+    #[test]
+    fn empty_prewarm_must_reach_indexing_not_report_fake_readiness() {
+        let mut request = SemanticSearchRequest {
+            generation: 1,
+            query: ParsedQuery::parse(""),
+            corpus_version: 1,
+            scope_version: 1,
+            prewarm: true,
+        };
+        assert!(!request.is_noop());
+        request.prewarm = false;
+        assert!(request.is_noop());
+    }
+}
+
+#[cfg(test)]
+mod indexing_interruption_tests {
+    use super::*;
+    #[test]
+    fn incoming_queries_interrupt_indexing_without_losing_commands() {
+        let (tx, rx) = mpsc::channel();
+        let mut queued = VecDeque::new();
+        let token = SemanticCancellationToken::new();
+        interrupt_for_queued_commands(&rx, &mut queued, &token);
+        assert!(!token.is_cancelled());
+        for generation in [2, 3] {
+            tx.send(SemanticWorkerCommand::Search {
+                generation,
+                query: ParsedQuery::parse("different question"),
+                corpus_version: 1,
+                scope_version: 1,
+                prewarm: false,
+            })
+            .unwrap();
+        }
+        interrupt_for_queued_commands(&rx, &mut queued, &token);
+        assert!(token.is_cancelled());
+        for expected in [2, 3] {
+            assert!(
+                matches!(queued.pop_front(), Some(SemanticWorkerCommand::Search { generation, .. }) if generation == expected)
+            );
+        }
+        assert!(queued.is_empty());
+        let closed = SemanticCancellationToken::new();
+        drop(tx);
+        interrupt_for_queued_commands(&rx, &mut queued, &closed);
+        assert!(closed.is_cancelled());
     }
 }

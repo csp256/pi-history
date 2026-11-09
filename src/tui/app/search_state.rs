@@ -136,6 +136,25 @@ pub(super) fn spawn_search_worker() -> (mpsc::Sender<SearchCommand>, mpsc::Recei
 }
 
 impl App {
+    pub(super) fn apply_semantic_rows(
+        &mut self,
+        rows: Vec<usize>,
+        metadata: HashMap<usize, SemanticResultMetadata>,
+    ) {
+        let selected = if self.semantic_search.results.is_empty() {
+            None
+        } else {
+            self.get_selected_conversation_index()
+        };
+        self.semantic_search.results = metadata;
+        self.apply_filtered(self.filter_indices(rows));
+        if let Some(position) =
+            selected.and_then(|index| self.filtered.iter().position(|row| *row == index))
+        {
+            self.selected = Some(position);
+        }
+    }
+
     pub(super) fn invalidate_search_generation(&mut self) {
         self.search_generation += 1;
         self.search_in_flight = false;
@@ -281,8 +300,9 @@ impl App {
         }
         self.semantic_search.last_status = SemanticProgress::Idle;
         self.semantic_search.error = None;
-        if prewarm {
-            self.semantic_search.results.clear();
+        self.semantic_search.results.clear();
+        if !prewarm {
+            self.apply_filtered(Vec::new());
         }
         let (corpus_version, scope_version) = match self.send_semantic_state() {
             Some(versions) => versions,
@@ -364,6 +384,16 @@ impl App {
                             }
                         }
                     }
+                    SemanticSearchMessage::Partial(response) => {
+                        if self.list_search_mode == ListSearchMode::Semantic
+                            && response.generation == active_generation
+                            && self.semantic_search.pending_generation == Some(response.generation)
+                        {
+                            self.semantic_search.pending_status = Some(response.progress);
+                            self.apply_semantic_rows(response.filtered, response.metadata);
+                            applied = true;
+                        }
+                    }
                     SemanticSearchMessage::Complete(response) => {
                         if self.list_search_mode == ListSearchMode::Semantic {
                             if response.prewarm
@@ -391,9 +421,7 @@ impl App {
                                 self.semantic_search.pending_status = None;
                                 self.semantic_search.last_status = response.progress;
                                 self.semantic_search.error = response.error;
-                                self.semantic_search.results = response.metadata;
-                                let filtered = self.filter_indices(response.filtered);
-                                self.apply_filtered(filtered);
+                                self.apply_semantic_rows(response.filtered, response.metadata);
                                 applied = true;
                             }
                         }
@@ -511,8 +539,14 @@ impl App {
                 } else {
                     completed.min(total).saturating_mul(100) / total
                 };
+                let partial =
+                    if !self.query.trim().is_empty() && !self.semantic_search.results.is_empty() {
+                        " (partial results)"
+                    } else {
+                        ""
+                    };
                 Some(format!(
-                    "sem embedding {percent}%  {}/{total} chunks",
+                    "sem embedding {percent}%  {}/{total} chunks{partial}",
                     completed.min(total)
                 ))
             }
@@ -541,6 +575,12 @@ impl App {
             ListSearchMode::Semantic => ListSearchMode::Lexical,
         };
         self.invalidate_search_generation();
+        // Results from the other backend are not results for the new mode.
+        // In particular, initial indexing may take time; never leave a small
+        // lexical result set looking like completed semantic search results.
+        if !self.query.trim().is_empty() {
+            self.apply_filtered(Vec::new());
+        }
         if self.list_search_mode == ListSearchMode::Semantic && self.query.trim().is_empty() {
             self.prewarm_semantic_cache();
         } else {
