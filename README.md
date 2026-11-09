@@ -4,7 +4,9 @@ Fork of [brrock/pi-history](https://github.com/brrock/pi-history) with a fourth
 tool display mode, **off**, which hides tool calls, results, and summaries.
 Pi session names (`session_info`) are also shown in the session picker and searchable.
 
-Fork-wide viewer defaults: **tools off · thinking off · diff show · info on**.
+Fork-wide viewer defaults: **tools off · thinking off · diff show · info on · auto on**.
+Sessions stay **oldest-first**, but open at the **latest message at the bottom**.
+Auto-reload follows new messages until you scroll away. Press `g` to read from the top.
 `diff show` is an action label: diff bodies stay hidden until you press `d`.
 Explicit CLI flags and config settings override these defaults.
 
@@ -244,7 +246,8 @@ conversations in a ledger-style format with scrolling support.
 - **Message order**: Press `o` to toggle oldest-first / newest-first (`order·old` /
   `order·new`). Only whole message blocks are reversed; text, code, and tool
   details inside each message keep their normal reading order. Toggling starts
-  at the top of the selected order. Oldest-first remains the default; set
+  at the top of the selected order. Sessions initially open at the latest message
+  (bottom for oldest-first, top for newest-first). Oldest-first remains the default; set
   `reverse_history = true` under `[display]` for newest-first on startup.
   Auto-reload follows the top in newest-first mode, unless you scroll away or
   are searching/navigating messages. Source files and full exports stay chronological.
@@ -254,8 +257,8 @@ conversations in a ledger-style format with scrolling support.
 - **Auto-reload**: Press `a` to toggle polling for changes about once a second
   (`auto·on` / `auto·off` in the footer). It follows new messages if you are at the
   bottom, but preserves your position when reading earlier messages, navigating
-  messages, or searching. It is off by default; set `auto_reload = true` under
-  `[display]` to enable it on startup. Works in both picker and direct-file views.
+  messages, or searching. It is on by default; set `auto_reload = false` under
+  `[display]` to disable it on startup. Works in both picker and direct-file views.
 - **Toggle thinking**: Press `T` to show/hide thinking blocks
 - **Show path**: Press `p` to display the conversation file path
 - **Light/dark theme**: Automatically detects terminal background color and
@@ -499,8 +502,8 @@ show_thinking = false
 # Display newest messages first (default: false; press o to toggle)
 # reverse_history = true
 
-# Auto-reload the open session once a second (default: false; press a to toggle)
-# auto_reload = true
+# Auto-reload the open session once a second (default: true; press a to toggle)
+# auto_reload = false
 
 # Show old/new diffs in edit tool calls (default: false; press d in viewer)
 edit_diffs = false
@@ -549,7 +552,7 @@ EOF
   (default: false)
 - `show_info` (boolean): Show timestamps in the viewer (the `i` / info toggle; default: true).
 - `reverse_history` (boolean): Display whole messages newest-first (default: false; press `o` to toggle).
-- `auto_reload` (boolean): Poll the open session for changes once a second (default: false; press `a` to toggle).
+- `auto_reload` (boolean): Poll the open session for changes once a second (default: true; press `a` to toggle).
 - `edit_diffs` (boolean): Show old/new diffs in edit tool calls (default: false; press `d` in the viewer to toggle)
 - `plain` (boolean): Output plain text without ledger formatting (default:
   false)

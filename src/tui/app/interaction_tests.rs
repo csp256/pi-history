@@ -616,12 +616,13 @@ fn allow_auto_reload_poll(app: &mut App) {
 }
 
 #[test]
-fn auto_reload_is_opt_in_and_a_toggles_it_without_stealing_search_input() {
+fn auto_reload_can_be_disabled_and_a_toggles_it_without_stealing_search_input() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("session.jsonl");
     write_named_conversation(&path, "Original");
     let mut app = app_with_conversation(path.clone(), None);
-    assert!(!app.auto_reload());
+    assert!(app.auto_reload());
+    app.set_auto_reload(false);
     app.enter_view_mode(80);
     append_reload_message(&path, "Automatic addition");
     app.check_auto_reload(10);
@@ -998,4 +999,99 @@ fn newest_first_startup_config_applies_to_single_file_and_stays_opt_in() {
     app.check_view_resize(80, 5);
     let text = view_text(&app);
     assert!(text.find("Newest").unwrap() < text.find("Oldest").unwrap());
+}
+
+#[test]
+fn default_startup_is_live_chronological_and_opens_at_latest_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    write_named_conversation(&path, "Oldest");
+    for i in 0..30 {
+        append_reload_message(&path, &format!("Message {i}"));
+    }
+    let mut app = app_with_conversation(path.clone(), None);
+    app.enter_view_mode(80);
+    app.apply_initial_view_position(7);
+    assert!(app.auto_reload());
+    let AppMode::View(state) = app.app_mode() else {
+        unreachable!()
+    };
+    assert!(!state.reverse_history);
+    assert_eq!(state.scroll_offset, state.total_lines.saturating_sub(7));
+    assert_eq!(state.focused_message, Some(30));
+    assert!(
+        state
+            .message_ranges
+            .windows(2)
+            .all(|p| p[0].entry_index < p[1].entry_index)
+    );
+    append_reload_message(&path, "Latest live update");
+    app.check_auto_reload(7);
+    let AppMode::View(state) = app.app_mode() else {
+        unreachable!()
+    };
+    assert_eq!(state.scroll_offset, state.total_lines.saturating_sub(7));
+    assert!(view_text(&app).contains("Latest live update"));
+    app.scroll_view(-5, 7);
+    let before = match app.app_mode() {
+        AppMode::View(state) => state.scroll_offset,
+        _ => unreachable!(),
+    };
+    app.apply_initial_view_position(7);
+    append_reload_message(&path, "Do not jump while reading");
+    allow_auto_reload_poll(&mut app);
+    app.check_auto_reload(7);
+    let AppMode::View(state) = app.app_mode() else {
+        unreachable!()
+    };
+    assert_eq!(
+        state.scroll_offset, before,
+        "initial positioning must be one-shot; later refresh preserves reading position"
+    );
+    app.exit_view_mode();
+    app.enter_view_mode(80);
+    app.apply_initial_view_position(9);
+    let AppMode::View(state) = app.app_mode() else {
+        unreachable!()
+    };
+    assert_eq!(
+        state.scroll_offset,
+        state.total_lines.saturating_sub(9),
+        "reopening starts at the latest message again using the actual viewport height"
+    );
+}
+
+#[test]
+fn single_file_opening_position_handles_chronological_reversed_and_short_sessions() {
+    for reverse in [false, true] {
+        for long in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("session.jsonl");
+            write_named_conversation(&path, "Original");
+            if long {
+                for i in 0..30 {
+                    append_reload_message(&path, &format!("Message {i}"));
+                }
+            }
+            let mut app =
+                App::new_single_file(path, ToolDisplayMode::Off, false, KeyBindings::default());
+            app.set_initial_reverse_history(reverse);
+            app.set_auto_reload(false); // Config overrides must not change opening position.
+            app.check_view_resize(80, 12);
+            app.apply_initial_view_position(8);
+            let AppMode::View(state) = app.app_mode() else {
+                unreachable!()
+            };
+            assert_eq!(
+                state.scroll_offset,
+                if reverse {
+                    0
+                } else {
+                    state.total_lines.saturating_sub(8)
+                }
+            );
+            assert!(!state.pending_initial_position);
+            assert!(!app.auto_reload());
+        }
+    }
 }

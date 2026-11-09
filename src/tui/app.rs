@@ -150,7 +150,7 @@ impl App {
             tool_display: parts.tool_display,
             show_thinking: parts.show_thinking,
             show_timing: true,
-            auto_reload: false,
+            auto_reload: true,
             reverse_history: false,
             last_auto_reload_check: None,
             single_file_mode: parts.single_file_mode,

@@ -45,6 +45,7 @@ impl App {
                     parsed_entries: Some(entries),
                     file_stamp,
                     scroll_offset: 0,
+                    pending_initial_position: true,
                     rendered_lines: rendered.lines,
                     total_lines,
                     tool_display: self.tool_display,
@@ -67,6 +68,27 @@ impl App {
                 self.status_message =
                     Some((format!("Failed to open: {}", e), std::time::Instant::now()));
             }
+        }
+    }
+
+    /// Open at the latest message without reversing chronological display order.
+    /// Called only after layout has determined the actual visible content height.
+    pub fn apply_initial_view_position(&mut self, viewport_height: usize) {
+        if let AppMode::View(state) = &mut self.app_mode {
+            if !state.pending_initial_position {
+                return;
+            }
+            state.pending_initial_position = false;
+            state.scroll_offset = if state.reverse_history {
+                0
+            } else {
+                state.total_lines.saturating_sub(viewport_height)
+            };
+            state.focused_message = if state.reverse_history {
+                (!state.message_ranges.is_empty()).then_some(0)
+            } else {
+                state.message_ranges.len().checked_sub(1)
+            };
         }
     }
 
@@ -297,6 +319,7 @@ impl App {
         // Show the beginning of the newly selected order: newest or oldest.
         if let AppMode::View(state) = &mut self.app_mode {
             state.scroll_offset = 0;
+            state.pending_initial_position = false;
             state.focused_message = (!state.message_ranges.is_empty()).then_some(0);
             state.message_nav_active = false;
             state.current_match = 0;

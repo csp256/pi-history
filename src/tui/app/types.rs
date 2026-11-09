@@ -72,6 +72,8 @@ pub struct ViewState {
     pub(super) file_stamp: Option<FileStamp>,
     /// Current scroll position (line offset)
     pub scroll_offset: usize,
+    /// Resolve opening position once the real viewport height is available.
+    pub(super) pending_initial_position: bool,
     /// Pre-rendered conversation lines
     pub rendered_lines: Vec<RenderedLine>,
     /// Total content height in lines
@@ -150,6 +152,7 @@ impl ViewState {
             conversation_path,
             parsed_entries: None,
             scroll_offset: 0,
+            pending_initial_position: true,
             rendered_lines: Vec::new(),
             total_lines: 0,
             tool_display,

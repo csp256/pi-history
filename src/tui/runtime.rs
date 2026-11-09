@@ -159,6 +159,7 @@ pub fn run_with_loader(
 
         app.receive_search_results();
 
+        app.apply_initial_view_position(viewport_height);
         app.check_auto_reload(viewport_height);
         guard.terminal.draw(|frame| ui::render(frame, &app))?;
 
@@ -278,6 +279,7 @@ pub fn run_single_file(
             AppMode::List => viewport_height,
         };
 
+        app.apply_initial_view_position(viewport_height);
         app.check_auto_reload(viewport_height);
         guard.terminal.draw(|frame| ui::render(frame, &app))?;
 

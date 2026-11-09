@@ -123,7 +123,7 @@ fn run() -> Result<()> {
         false,
     );
     let show_info = display_config.show_info();
-    let auto_reload = display_config.auto_reload.unwrap_or(false);
+    let auto_reload = display_config.auto_reload();
     let reverse_history = display_config.reverse_history.unwrap_or(false);
     tool_format::set_render_edit_diffs(display_config.edit_diffs());
     let plain_mode = resolve_bool_setting(args.plain, false, display_config.plain, false);
