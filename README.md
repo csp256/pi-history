@@ -130,6 +130,7 @@ the preview.
 | `t`            | Cycle tools: summary/off/truncated/full            |
 | `d`            | Toggle edit diffs                                  |
 | `T`            | Toggle thinking                                    |
+| `r`            | Reload the open session from disk                  |
 | `e`            | Export conversation to file                        |
 | `y`            | Copy to clipboard (message if selected, else menu) |
 | `p`            | Show file path                                     |
@@ -238,6 +239,9 @@ conversations in a ledger-style format with scrolling support.
   navigate matches
 - **Cycle tools**: Press `t` to cycle tool display (summary → off → truncated → full)
 - **Toggle edit diffs**: Press `d` to show/hide full old/new edit diff bodies
+- **Reload**: Press `r` to read new messages from disk while an agent is running.
+  Reload preserves your reading position, display settings, and expanded outputs,
+  and updates active search matches. There is no automatic live refresh.
 - **Toggle thinking**: Press `T` to show/hide thinking blocks
 - **Show path**: Press `p` to display the conversation file path
 - **Light/dark theme**: Automatically detects terminal background color and

@@ -225,6 +225,29 @@ impl App {
         }
     }
 
+    pub(super) fn reload_view(&mut self, viewport_height: usize) {
+        let AppMode::View(state) = &mut self.app_mode else {
+            return;
+        };
+        // Read before replacing the snapshot so failures leave the view intact.
+        match crate::tui::viewer::parse_conversation_file(&state.conversation_path) {
+            Ok(entries) => {
+                state.parsed_entries = Some(Arc::new(entries));
+                state.hovered_tool_output = None;
+                // Reuse anchor restoration and active-search recomputation.
+                self.re_render_view(viewport_height);
+                self.status_message =
+                    Some(("Session reloaded".to_string(), std::time::Instant::now()));
+            }
+            Err(error) => {
+                self.status_message = Some((
+                    format!("Failed to reload session: {error}"),
+                    std::time::Instant::now(),
+                ));
+            }
+        }
+    }
+
     pub(super) fn re_render_view(&mut self, viewport_height: usize) {
         use crate::tui::viewer::{parse_conversation_file, render_parsed_conversation};
 
