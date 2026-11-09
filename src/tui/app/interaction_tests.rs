@@ -470,3 +470,132 @@ fn submit_empty_rename_clears_searchable_title() {
     assert_eq!(app.conversations[0].custom_title, None);
     assert!(search::search(&app.conversations, &app.searchable, "old", Local::now()).is_empty());
 }
+
+#[test]
+fn reload_reads_appended_messages_preserving_position_settings_and_search() {
+    use std::io::Write;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    let mut file = std::fs::File::create(&path).unwrap();
+    for i in 0..30 {
+        writeln!(file, "{}", serde_json::json!({
+            "type": "user", "message": {"role": "user", "content": format!("Original message {i}")}
+        })).unwrap();
+    }
+    let mut app = app_with_conversation(path.clone(), None);
+    app.enter_view_mode(80);
+    let id = crate::tui::viewer::ToolOutputId("saved-expansion".to_string());
+    if let AppMode::View(state) = &mut app.app_mode {
+        state.scroll_offset = 10;
+        state.tool_display = ToolDisplayMode::Off;
+        state.show_thinking = false;
+        state.show_timing = true;
+        state.expanded_tool_outputs.insert(id.clone());
+        state.hovered_tool_output = Some(id.clone());
+        state.search_mode = ViewSearchMode::Active;
+        state.search_query = "appended-marker".to_string();
+    }
+    writeln!(file, "{}", serde_json::json!({
+        "type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "appended-marker"}]}
+    })).unwrap();
+    app.re_render_view(10);
+    assert!(
+        !view_text(&app).contains("appended-marker"),
+        "display rerender should keep its cached snapshot"
+    );
+    assert!(
+        app.handle_key(KeyCode::Char('r'), KeyModifiers::NONE, 10)
+            .is_none()
+    );
+    assert!(view_text(&app).contains("appended-marker"));
+    let AppMode::View(state) = app.app_mode() else {
+        panic!("expected view")
+    };
+    assert_eq!(state.scroll_offset, 10);
+    assert_eq!(state.tool_display, ToolDisplayMode::Off);
+    assert!(!state.show_thinking);
+    assert!(state.show_timing);
+    assert!(state.expanded_tool_outputs.contains(&id));
+    assert!(state.hovered_tool_output.is_none());
+    assert_eq!(state.message_ranges.len(), 31);
+    assert_eq!(state.search_matches.len(), 1);
+    assert_eq!(app.status_message.as_ref().unwrap().0, "Session reloaded");
+}
+
+#[test]
+fn reload_single_file_handles_replaced_contents_and_clamps_scroll() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    write_named_conversation(&path, &"Old text\n\n".repeat(30));
+    let mut app = App::new_single_file(
+        path.clone(),
+        ToolDisplayMode::Off,
+        false,
+        KeyBindings::default(),
+    );
+    app.check_view_resize(80, 10);
+    app.handle_key(KeyCode::End, KeyModifiers::NONE, 10);
+    write_named_conversation(&path, "Replacement text");
+    app.handle_key(KeyCode::Char('r'), KeyModifiers::NONE, 10);
+    let text = view_text(&app);
+    assert!(text.contains("Replacement text"));
+    assert!(!text.contains("Old text"));
+    let AppMode::View(state) = app.app_mode() else {
+        panic!("expected view")
+    };
+    assert_eq!(state.scroll_offset, 0);
+    assert_eq!(state.message_ranges.len(), 1);
+}
+
+#[test]
+fn reload_failure_keeps_previous_snapshot_and_reports_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    write_named_conversation(&path, "Keep this text");
+    let mut app = app_with_conversation(path.clone(), None);
+    app.enter_view_mode(80);
+    let before = view_text(&app);
+    let snapshot = match app.app_mode() {
+        AppMode::View(state) => state.parsed_entries.clone().unwrap(),
+        _ => unreachable!(),
+    };
+    std::fs::remove_file(&path).unwrap();
+    app.handle_key(KeyCode::Char('r'), KeyModifiers::NONE, 10);
+    assert_eq!(view_text(&app), before);
+    let AppMode::View(state) = app.app_mode() else {
+        panic!("expected view")
+    };
+    assert!(Arc::ptr_eq(
+        &snapshot,
+        state.parsed_entries.as_ref().unwrap()
+    ));
+    assert!(
+        app.status_message
+            .as_ref()
+            .unwrap()
+            .0
+            .starts_with("Failed to reload session:")
+    );
+}
+
+#[test]
+fn reload_key_does_not_steal_search_typing_or_ctrl_r_resume() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    write_named_conversation(&path, "Original");
+    let mut app = app_with_conversation(path.clone(), None);
+    app.enter_view_mode(80);
+    write_named_conversation(&path, "Changed");
+    app.handle_key(KeyCode::Char('/'), KeyModifiers::NONE, 10);
+    app.handle_key(KeyCode::Char('r'), KeyModifiers::NONE, 10);
+    let AppMode::View(state) = app.app_mode() else {
+        panic!("expected view")
+    };
+    assert_eq!(state.search_query, "r");
+    assert!(!view_text(&app).contains("Changed"));
+    app.handle_key(KeyCode::Esc, KeyModifiers::NONE, 10);
+    assert!(
+        matches!(app.handle_key(KeyCode::Char('r'), KeyModifiers::CONTROL, 10), Some(Action::Resume(p)) if p == path)
+    );
+    assert!(!view_text(&app).contains("Changed"));
+}

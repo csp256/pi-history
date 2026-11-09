@@ -297,6 +297,10 @@ impl App {
                 self.toggle_view_timing(viewport_height);
                 None
             }
+            KeyCode::Char('r') if modifiers.is_empty() => {
+                self.reload_view(viewport_height);
+                None
+            }
             KeyCode::Char('p') => {
                 if let AppMode::View(ref state) = self.app_mode {
                     self.status_message = Some((
