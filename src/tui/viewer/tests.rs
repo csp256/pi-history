@@ -1718,3 +1718,36 @@ fn formatting_off_preserves_markdown_but_never_replays_terminal_controls() {
             .all(|(_, style)| style.ansi.is_none() && !style.bold)
     );
 }
+
+#[test]
+fn headings_use_pi_accent_in_messages_and_thinking_with_or_without_ansi() {
+    assert_eq!(crate::tui::theme::Theme::dark().heading, (205, 154, 34));
+    assert_eq!(crate::tui::theme::Theme::light().heading, (143, 104, 2));
+    for level in 1..=6 {
+        for prefix in ["", "\x1b[0m"] {
+            let source = format!("{prefix}{} Heading\n\nBody", "#".repeat(level));
+            for thinking in [false, true] {
+                let lines = super::markdown::render_text_to_lines(&source, 80, true);
+                let lines = if thinking {
+                    super::markdown::apply_thinking_style(lines)
+                } else {
+                    lines
+                };
+                let spans: Vec<_> = lines.iter().flat_map(|line| &line.spans).collect();
+                let (_, heading) = spans.iter().find(|(text, _)| text == "Heading").unwrap();
+                assert_eq!(heading.fg, Some(th().heading));
+                assert!(heading.bold);
+                assert_eq!(heading.italic, thinking);
+                let (_, body) = spans.iter().find(|(text, _)| text == "Body").unwrap();
+                assert_eq!(
+                    body.fg,
+                    if thinking {
+                        Some(th().thinking_text)
+                    } else {
+                        None
+                    }
+                );
+            }
+        }
+    }
+}

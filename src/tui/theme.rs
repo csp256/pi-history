@@ -91,7 +91,7 @@ impl Theme {
             diff_add: (120, 200, 120),
             diff_remove: (220, 120, 120),
             code_color: (147, 161, 199),
-            heading: (180, 190, 200),
+            heading: (205, 154, 34), // Pi dark mdHeading (#cd9a22)
             thinking_text: (140, 145, 150),
             tool_text: (140, 145, 150),
 
@@ -145,7 +145,7 @@ impl Theme {
             diff_add: (40, 120, 60),        // Dark green for additions
             diff_remove: (180, 50, 50),     // Dark red for removals
             code_color: (80, 70, 130),      // Dark purple-blue
-            heading: (52, 70, 100),         // Dark slate navy
+            heading: (143, 104, 2),         // Pi light mdHeading (#8f6802)
             thinking_text: (110, 118, 128), // Cool medium gray
             tool_text: (96, 108, 118),      // Slightly cool gray
 
