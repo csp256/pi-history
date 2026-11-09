@@ -48,3 +48,7 @@ install-dev:
 # Run the application
 run *ARGS:
     cargo run -- "$@"
+
+# Test the optional Pi companion without installing Node dependencies
+bridge-test:
+    node --test bridge/server.test.mjs

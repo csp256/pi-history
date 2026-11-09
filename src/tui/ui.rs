@@ -3,8 +3,8 @@ use crate::search::literal::{Literal, match_literal_ranges};
 use crate::search::normalize_for_search;
 use crate::search::query::ParsedQuery;
 use crate::tui::app::{
-    App, AppMode, DialogMode, ListSearchMode, LoadingState, SemanticResultMetadata, ViewSearchMode,
-    ViewState, list_lines_per_item,
+    App, AppMode, ComposerPhase, DialogMode, ListSearchMode, LoadingState, MessageComposer,
+    SemanticResultMetadata, ViewSearchMode, ViewState, list_lines_per_item,
 };
 use crate::tui::theme::{self, Theme};
 use crate::tui::viewer::{LineStyle, RenderedLine};
@@ -504,6 +504,7 @@ fn render_view_mode(frame: &mut Frame, app: &App, state: &ViewState) {
         }
         DialogMode::SemanticDebug => render_semantic_debug_popup(frame, app),
         DialogMode::Rename { input, cursor } => render_rename_dialog(frame, input, *cursor),
+        DialogMode::MessageComposer(composer) => render_message_composer(frame, composer),
         DialogMode::None => {}
     }
 }
@@ -876,6 +877,8 @@ fn render_view_status_bar(frame: &mut Frame, app: &App, state: &ViewState, area:
             Span::styled("help  ", label_style),
             Span::styled("/", key_style),
             Span::styled("search  ", label_style),
+            Span::styled("m", key_style),
+            Span::styled("essage  ", label_style),
             Span::styled("r", key_style),
             Span::styled("eload  ", label_style),
             Span::styled("e", key_style),
@@ -1336,6 +1339,7 @@ fn render_help_overlay(
             ("r".into(), "Reload session from disk"),
             ("a".into(), "Toggle auto-reload (once a second)"),
             ("o".into(), "Toggle oldest / newest message first"),
+            ("m".into(), "Message the running Pi session"),
             ("e".into(), "Export to file"),
             ("y".into(), "Copy to clipboard / message"),
             ("p".into(), "Show file path"),
@@ -4210,5 +4214,177 @@ mod tests {
         assert_eq!(ranges.len(), 1);
         let ranges = find_normalized_match_ranges("the red", "red");
         assert_eq!(ranges.len(), 1);
+    }
+}
+
+/// Hard-wrap without changing message text; keep a Unicode-aware cursor visible.
+fn composer_lines(text: &str, cursor: usize, width: usize) -> (Vec<String>, usize, usize) {
+    let width = width.max(1);
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut column = 0;
+    let mut position = (0, 0);
+    for (index, character) in text.chars().enumerate() {
+        if character == '\n' {
+            if index == cursor {
+                position = (lines.len(), column);
+            }
+            lines.push(std::mem::take(&mut current));
+            column = 0;
+            continue;
+        }
+        let mut value = if character == '\t' {
+            "    ".to_string()
+        } else {
+            character.to_string()
+        };
+        let mut columns = UnicodeWidthStr::width(value.as_str());
+        if columns > width {
+            value = "�".to_string();
+            columns = 1;
+        }
+        if column + columns > width && column > 0 {
+            lines.push(std::mem::take(&mut current));
+            column = 0;
+        }
+        if index == cursor {
+            position = (lines.len(), column);
+        }
+        current.push_str(&value);
+        column += columns;
+    }
+    if cursor >= text.chars().count() {
+        if column >= width {
+            lines.push(std::mem::take(&mut current));
+            column = 0;
+        }
+        position = (lines.len(), column);
+    }
+    lines.push(current);
+    (lines, position.0, position.1)
+}
+
+fn render_message_composer(frame: &mut Frame, composer: &MessageComposer) {
+    let area = frame.area();
+    let width = area.width.saturating_sub(4).clamp(1, 100).min(area.width);
+    let height = area.height.saturating_sub(2).clamp(1, 22).min(area.height);
+    let popup = Rect::new(
+        area.x + (area.width - width) / 2,
+        area.y + (area.height - height) / 2,
+        width,
+        height,
+    );
+    frame.render_widget(Clear, popup);
+    let border = Block::default()
+        .title(" Message running Pi ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(rgb(th().accent)))
+        .style(Style::default().bg(rgb(th().status_bar_bg)));
+    let inner = border.inner(popup);
+    frame.render_widget(border, popup);
+    if inner.width < 8 || inner.height < 8 {
+        frame.render_widget(
+            Paragraph::new("Enlarge terminal to compose. Esc cancels."),
+            inner,
+        );
+        return;
+    }
+    let error_height = if composer.error.is_some() { 3 } else { 0 };
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(2),
+            Constraint::Length(error_height),
+            Constraint::Min(1),
+            Constraint::Length(2),
+        ])
+        .split(inner);
+    let name = composer
+        .target
+        .as_ref()
+        .and_then(|t| t.name.as_deref())
+        .unwrap_or("Viewed session")
+        .replace(['\r', '\n'], " ");
+    frame.render_widget(
+        Paragraph::new(format!("{name}\n{}", composer.session_file.display()))
+            .style(Style::default().fg(rgb(th().text_secondary))),
+        chunks[0],
+    );
+    let status = match composer.phase {
+        ComposerPhase::Connecting => "Connecting to the selected session...".to_string(),
+        ComposerPhase::Sending => {
+            "Sending... wait for acknowledgement (cannot cancel in flight).".to_string()
+        }
+        ComposerPhase::Ready => composer.target.as_ref().map_or(
+            "Not connected. Enter retries connection.".to_string(),
+            |target| {
+                format!(
+                    "Pi PID {} — {} when checked. Text-only user message.",
+                    target.endpoint.pid,
+                    if target.busy { "busy" } else { "idle" }
+                )
+            },
+        ),
+    };
+    frame.render_widget(
+        Paragraph::new(status).wrap(ratatui::widgets::Wrap { trim: false }),
+        chunks[1],
+    );
+    if let Some(error) = &composer.error {
+        frame.render_widget(
+            Paragraph::new(error.as_str())
+                .wrap(ratatui::widgets::Wrap { trim: false })
+                .style(Style::default().fg(Color::Yellow)),
+            chunks[2],
+        );
+    }
+    let draft = chunks[3];
+    let (lines, row, column) =
+        composer_lines(&composer.input, composer.cursor, draft.width as usize);
+    let offset = (row + 1).saturating_sub(draft.height as usize);
+    let visible: Vec<Line<'_>> = lines
+        .iter()
+        .skip(offset)
+        .take(draft.height as usize)
+        .map(|line| Line::from(line.as_str()))
+        .collect();
+    frame.render_widget(
+        Paragraph::new(visible).style(Style::default().fg(rgb(th().text_primary))),
+        draft,
+    );
+    if draft.width > 0 && draft.height > 0 {
+        frame.set_cursor_position(Position::new(
+            draft.x + column.min(draft.width.saturating_sub(1) as usize) as u16,
+            draft.y
+                + row
+                    .saturating_sub(offset)
+                    .min(draft.height.saturating_sub(1) as usize) as u16,
+        ));
+    }
+    frame.render_widget(Paragraph::new(format!("Enter send/steer · Alt+Enter (Ctrl+Q) follow-up · Ctrl+J newline\nEsc cancel · {} / 32768 bytes · slash commands are plain text",composer.input.len())).style(Style::default().fg(rgb(th().text_secondary))),chunks[4]);
+}
+
+#[cfg(test)]
+mod composer_tests {
+    use super::composer_lines;
+    #[test]
+    fn wraps_unicode_and_keeps_end_cursor_inside_the_next_row() {
+        assert_eq!(
+            composer_lines("ab世界", 4, 4),
+            (vec!["ab世".to_string(), "界".to_string()], 1, 2)
+        );
+        assert_eq!(
+            composer_lines("abcd", 4, 4),
+            (vec!["abcd".to_string(), "".to_string()], 1, 0)
+        );
+    }
+    #[test]
+    fn preserves_explicit_newlines_and_expands_tabs_only_for_display() {
+        assert_eq!(
+            composer_lines("λ\n\tX", 4, 8),
+            (vec!["λ".to_string(), "    X".to_string()], 1, 5)
+        );
+        assert_eq!(composer_lines("", 0, 0), (vec!["".to_string()], 0, 0));
     }
 }

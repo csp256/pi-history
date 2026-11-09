@@ -6,6 +6,7 @@ mod debug_log;
 mod display;
 mod error;
 mod history;
+mod live_bridge;
 mod markdown;
 mod pager;
 mod pi;

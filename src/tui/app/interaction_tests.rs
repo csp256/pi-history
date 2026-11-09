@@ -1226,3 +1226,189 @@ fn settings_at_latest_keep_search_state_and_continue_auto_following() {
     assert_eq!(state.scroll_offset, state.total_lines.saturating_sub(8));
     assert!(view_text(&app).contains("Still following updates"));
 }
+
+fn composer_mut(app: &mut App) -> &mut MessageComposer {
+    match &mut app.dialog_mode {
+        DialogMode::MessageComposer(composer) => composer,
+        _ => panic!("composer expected"),
+    }
+}
+
+#[test]
+fn message_composer_edits_unicode_and_multiline_paste_without_touching_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    write_conversation(&path, None);
+    let before = std::fs::read(&path).unwrap();
+    let mut app = App::new_single_file(
+        path.clone(),
+        ToolDisplayMode::Off,
+        false,
+        KeyBindings::default(),
+    );
+    app.handle_key(KeyCode::Char('m'), KeyModifiers::NONE, 10);
+    assert!(matches!(app.dialog_mode, DialogMode::MessageComposer(_)));
+    app.handle_message_paste("λ世界\r\nsecond\u{1b}");
+    assert_eq!(composer_mut(&mut app).input, "λ世界\nsecond");
+    app.handle_key(KeyCode::Home, KeyModifiers::NONE, 10);
+    app.handle_key(KeyCode::Right, KeyModifiers::NONE, 10);
+    app.handle_key(KeyCode::Delete, KeyModifiers::NONE, 10);
+    app.handle_key(KeyCode::Char('好'), KeyModifiers::NONE, 10);
+    assert!(composer_mut(&mut app).input.starts_with("λ好界\n"));
+    let input = composer_mut(&mut app).input.clone();
+    app.handle_message_paste(&"x".repeat(crate::live_bridge::MAX_MESSAGE_BYTES));
+    assert_eq!(composer_mut(&mut app).input, input);
+    app.handle_key(KeyCode::Esc, KeyModifiers::NONE, 10);
+    assert_eq!(app.dialog_mode, DialogMode::None);
+    assert_eq!(std::fs::read(path).unwrap(), before);
+}
+
+#[test]
+fn offline_composer_keeps_draft_and_acceptance_is_the_only_success_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    write_conversation(&path, None);
+    let mut app = App::new_single_file(path, ToolDisplayMode::Off, false, KeyBindings::default());
+    app.start_message_composer();
+    app.handle_message_paste("Keep this draft");
+    let (tx, rx) = mpsc::channel();
+    app.message_rx = Some(rx);
+    tx.send(message_state::MessageJob::Connected(Err(
+        "Offline".to_string()
+    )))
+    .unwrap();
+    app.receive_message_results();
+    assert_eq!(composer_mut(&mut app).input, "Keep this draft");
+    assert_eq!(composer_mut(&mut app).error.as_deref(), Some("Offline"));
+    assert!(app.status_message.is_none());
+    composer_mut(&mut app).phase = ComposerPhase::Sending;
+    app.handle_key(KeyCode::Esc, KeyModifiers::NONE, 10);
+    app.handle_key(KeyCode::Char('x'), KeyModifiers::NONE, 10);
+    app.handle_key(KeyCode::Enter, KeyModifiers::NONE, 10);
+    assert_eq!(composer_mut(&mut app).input, "Keep this draft");
+    let (tx, rx) = mpsc::channel();
+    app.message_rx = Some(rx);
+    drop(tx);
+    app.receive_message_results();
+    assert!(
+        composer_mut(&mut app)
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("may already have succeeded")
+    );
+    assert_eq!(composer_mut(&mut app).input, "Keep this draft");
+    let (tx, rx) = mpsc::channel();
+    app.message_rx = Some(rx);
+    tx.send(message_state::MessageJob::Sent(Ok("Accepted".to_string())))
+        .unwrap();
+    app.receive_message_results();
+    assert_eq!(app.dialog_mode, DialogMode::None);
+    assert_eq!(app.status_message.as_ref().unwrap().0, "Accepted");
+}
+
+#[test]
+fn failed_send_keeps_draft_does_not_auto_retry_and_reuses_id_on_explicit_retry() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    write_conversation(&path, None);
+    let mut app = App::new_single_file(
+        path.clone(),
+        ToolDisplayMode::Off,
+        false,
+        KeyBindings::default(),
+    );
+    app.start_message_composer();
+    app.message_rx = None;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint=serde_json::from_value(serde_json::json!({"version":1,"port":listener.local_addr().unwrap().port(),"pid":1,"token":"a".repeat(64),"sessionFile":path,"sessionId":"test"})).unwrap();
+    let composer = composer_mut(&mut app);
+    composer.phase = ComposerPhase::Ready;
+    composer.target = Some(crate::live_bridge::LiveTarget {
+        endpoint,
+        name: None,
+        busy: true,
+    });
+    app.handle_message_paste("Hello λ");
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let received = seen.clone();
+    let worker = std::thread::spawn(move || {
+        for attempt in 0..2 {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+            received.lock().unwrap().push(request.clone());
+            if attempt == 1 {
+                writeln!(stream,"{}",serde_json::json!({"version":1,"ok":true,"requestId":request["requestId"],"disposition":"accepted","delivery":"steer"})).unwrap();
+            }
+        }
+    });
+    for attempt in 0..2 {
+        app.handle_key(KeyCode::Enter, KeyModifiers::NONE, 10);
+        let deadline = std::time::Instant::now() + Duration::from_secs(4);
+        while app.has_message_work() && std::time::Instant::now() < deadline {
+            app.receive_message_results();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!app.has_message_work());
+        if attempt == 0 {
+            let composer = composer_mut(&mut app);
+            assert_eq!(composer.input, "Hello λ");
+            assert!(
+                composer
+                    .error
+                    .as_ref()
+                    .unwrap()
+                    .contains("may already have succeeded")
+            );
+            for _ in 0..5 {
+                app.receive_message_results();
+            }
+            assert_eq!(seen.lock().unwrap().len(), 1);
+        }
+    }
+    worker.join().unwrap();
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen[0]["requestId"], seen[1]["requestId"]);
+    assert_eq!(seen[0]["delivery"], "steer");
+    assert_eq!(app.dialog_mode, DialogMode::None);
+}
+
+#[test]
+fn bracketed_paste_preserves_other_text_inputs_and_never_triggers_viewer_shortcuts() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    write_conversation(&path, None);
+    let mut app = app_with_conversation(path.clone(), None);
+    app.handle_paste("q?λ\n");
+    assert_eq!(app.query, "q?λ ");
+    assert_eq!(app.dialog_mode, DialogMode::None);
+    app.dialog_mode = DialogMode::Rename {
+        input: String::new(),
+        cursor: 0,
+    };
+    app.handle_paste("other\r\nname");
+    assert_eq!(
+        app.dialog_mode,
+        DialogMode::Rename {
+            input: "other name".to_string(),
+            cursor: 10
+        }
+    );
+    let mut app = App::new_single_file(path, ToolDisplayMode::Off, false, KeyBindings::default());
+    app.handle_paste("mtq");
+    assert_eq!(app.dialog_mode, DialogMode::None);
+    assert_eq!(app.tool_display, ToolDisplayMode::Off);
+    app.handle_key(KeyCode::Char('/'), KeyModifiers::NONE, 10);
+    app.handle_paste("hello λ");
+    let AppMode::View(state) = app.app_mode() else {
+        panic!("view expected")
+    };
+    assert_eq!(state.search_query, "hello λ");
+    assert_eq!(state.search_mode, ViewSearchMode::Typing);
+}
