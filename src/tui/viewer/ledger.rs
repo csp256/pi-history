@@ -56,6 +56,7 @@ pub(super) fn push_row(
                     dimmed: false,
                     bold: false,
                     italic: false,
+                    ..Default::default()
                 },
             ));
         }
@@ -75,6 +76,7 @@ pub(super) fn push_row(
                     bold,
                     dimmed,
                     italic: false,
+                    ..Default::default()
                 },
             ));
         }

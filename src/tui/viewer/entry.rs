@@ -6,7 +6,7 @@ use super::RenderedLine;
 
 use super::commands::process_command_message;
 use super::ledger::{render_ledger_block_styled, render_ledger_block_styled_dimmed};
-use super::markdown::{apply_thinking_style, render_markdown_to_lines};
+use super::markdown::{apply_thinking_style, render_text_to_lines};
 use super::style::subagent_label;
 use super::summary::{render_tool_activity_summary, summarize_tool_calls};
 use super::timing::{RowTiming, TimingSlot};
@@ -310,7 +310,7 @@ fn step_user_text(
         }
     };
     let Some(text) = text else { return false };
-    let md_lines = render_markdown_to_lines(&text, ctx.options.content_width);
+    let md_lines = render_text_to_lines(&text, ctx.options.content_width, ctx.options.render_ansi);
     if ctx.style.dimmed {
         render_ledger_block_styled_dimmed(
             lines,
@@ -348,7 +348,8 @@ fn step_assistant_text(
         if text.trim().is_empty() {
             continue;
         }
-        let md_lines = render_markdown_to_lines(text, ctx.options.content_width);
+        let md_lines =
+            render_text_to_lines(text, ctx.options.content_width, ctx.options.render_ansi);
         if ctx.style.dimmed {
             render_ledger_block_styled_dimmed(
                 lines,
@@ -395,7 +396,11 @@ fn step_aggregated_text(
         return false;
     }
     let combined = texts.join("\n\n");
-    let md_lines = render_markdown_to_lines(&combined, ctx.options.content_width);
+    let md_lines = render_text_to_lines(
+        &combined,
+        ctx.options.content_width,
+        ctx.options.render_ansi,
+    );
     render_ledger_block_styled_dimmed(
         lines,
         &ctx.style.label,
@@ -459,6 +464,7 @@ fn step_tool_calls(
         render_tool_call(
             lines,
             &ToolCallRenderSpec {
+                render_ansi: ctx.options.render_ansi,
                 name,
                 input,
                 label: &ctx.style.label,
@@ -493,7 +499,8 @@ fn step_thinking(
         if thinking.is_empty() {
             continue;
         }
-        let md_lines = render_markdown_to_lines(thinking, ctx.options.content_width);
+        let md_lines =
+            render_text_to_lines(thinking, ctx.options.content_width, ctx.options.render_ansi);
         let styled_lines = apply_thinking_style(md_lines);
         render_ledger_block_styled(
             lines,
@@ -549,6 +556,7 @@ fn step_user_tool_results(
             render_tool_result(
                 lines,
                 &ToolResultRenderSpec {
+                    render_ansi: ctx.options.render_ansi,
                     text: &content_str,
                     content_width: ctx.options.content_width,
                     timing: timing.consume(),

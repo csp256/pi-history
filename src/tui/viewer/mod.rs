@@ -12,6 +12,7 @@ use std::path::Path;
 
 use crate::tui::theme::{self, Theme};
 
+mod ansi;
 mod commands;
 mod entry;
 mod ledger;
@@ -106,6 +107,7 @@ pub struct RenderOptions {
     pub tool_display: ToolDisplayMode,
     pub show_thinking: bool,
     pub show_timing: bool,
+    pub render_ansi: bool,
     pub content_width: usize,
     pub expanded_tool_outputs: BTreeSet<ToolOutputId>,
 }

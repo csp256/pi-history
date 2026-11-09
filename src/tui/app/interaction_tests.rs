@@ -1412,3 +1412,62 @@ fn bracketed_paste_preserves_other_text_inputs_and_never_triggers_viewer_shortcu
     assert_eq!(state.search_query, "hello λ");
     assert_eq!(state.search_mode, ViewSearchMode::Typing);
 }
+
+#[test]
+fn ansi_toggle_keeps_latest_edge_and_survives_reload_in_both_orders() {
+    for reverse in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        write_settings_session(&path, true);
+        let mut app =
+            App::new_single_file(path, ToolDisplayMode::Off, true, KeyBindings::default());
+        app.set_initial_reverse_history(reverse);
+        app.check_view_resize(40, 8);
+        app.apply_initial_view_position(8);
+        for _ in 0..2 {
+            app.handle_key(KeyCode::Char('A'), KeyModifiers::SHIFT, 8);
+            let AppMode::View(state) = app.app_mode() else {
+                panic!("view expected")
+            };
+            assert_eq!(
+                state.scroll_offset,
+                if reverse {
+                    0
+                } else {
+                    state.total_lines.saturating_sub(8)
+                }
+            );
+        }
+        app.set_initial_render_ansi(true);
+        app.handle_key(KeyCode::Char('r'), KeyModifiers::NONE, 8);
+        let AppMode::View(state) = app.app_mode() else {
+            panic!("view expected")
+        };
+        assert!(state.render_ansi);
+    }
+}
+
+#[test]
+fn ansi_startup_setting_applies_to_picker_and_single_file_without_changing_defaults() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    write_conversation(&path, None);
+    let mut list = app_with_conversation(path.clone(), None);
+    assert!(!list.render_ansi);
+    list.set_initial_render_ansi(true);
+    list.enter_view_mode(80);
+    let AppMode::View(state) = list.app_mode() else {
+        panic!("view expected")
+    };
+    assert!(state.render_ansi);
+    let mut single =
+        App::new_single_file(path, ToolDisplayMode::Off, false, KeyBindings::default());
+    single.set_initial_render_ansi(true);
+    let AppMode::View(state) = single.app_mode() else {
+        panic!("view expected")
+    };
+    assert!(state.render_ansi);
+    let config: crate::config::ConfigFile =
+        toml::from_str("[display]\nrender_ansi = true\n").unwrap();
+    assert_eq!(config.display.unwrap().render_ansi, Some(true));
+}

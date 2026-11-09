@@ -141,6 +141,8 @@ pub struct DisplayConfig {
     pub show_thinking: Option<bool>,
     /// Show timestamps in the viewer (the info toggle).
     pub show_info: Option<bool>,
+    /// Interpret ANSI SGR styling in viewer text (default: false).
+    pub render_ansi: Option<bool>,
     /// Poll the open session for changes once a second (default: true).
     pub auto_reload: Option<bool>,
     /// Display whole messages newest-first (default: false; viewer order toggle).

@@ -37,4 +37,6 @@ pub struct LineStyle {
     pub bold: bool,
     pub dimmed: bool,
     pub italic: bool,
+    /// Safe, already-decoded terminal styling (never raw control bytes).
+    pub ansi: Option<ratatui::style::Style>,
 }

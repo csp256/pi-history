@@ -391,6 +391,34 @@ processes, and never edits history files or launches an agent. Offline/error dra
 are retained. A success notice acknowledges dispatch, not model completion; a lost
 acknowledgement is reported as uncertain and is never retried automatically.
 
+### ANSI colors in traces
+
+Press **`A`** in the TUI viewer to toggle **ANSI rendering** (`ANSI·on/off` in the
+footer). This interprets SGR foreground/background colors (including 256-color and
+RGB), bold, dim, italic, underline, and related styles in message/thinking text and
+tool bodies/results. Use `T` to reveal thinking if it is hidden.
+
+Start enabled with `pi-history --render-ansi`, or persist it in
+`~/.config/pi-history/config.toml`:
+
+```toml
+[display]
+render_ansi = true
+```
+
+The fork default remains off; `--no-render-ansi` overrides an enabled config.
+ANSI-bearing blocks are rendered as terminal-styled **literal text**, preserving
+spacing instead of interpreting Markdown. Ordinary Markdown blocks are unchanged.
+Colors reset at block boundaries; reset codes such as `39m` return to the viewer's
+base theme. Only real escape sequences are interpreted, not ordinary text that
+happens to say `[39m`.
+
+This is styling, **not terminal emulation**: cursor movement, screen clearing,
+OSC titles/hyperlinks/clipboard operations, other control strings, and malformed
+sequences are discarded, never replayed to your terminal. History files and
+noninteractive exports are unchanged. Toggling preserves your latest-edge follow
+or scrolled-away reading position.
+
 ### Resuming conversations
 
 If you want to continue a conversation, launch `pi-history` with `--resume`
