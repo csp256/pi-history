@@ -127,20 +127,48 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
 }
 
 fn lexical_overlap(query: &str, text: &str) -> f32 {
-    let query_words = query
-        .split_whitespace()
-        .map(|word| word.to_lowercase())
+    // Search framing should not dilute a specific name such as "isovis".
+    let words = crate::semantic::evidence::query_terms(query)
+        .into_iter()
+        .filter(|word| {
+            !matches!(
+                word.as_str(),
+                "a" | "an"
+                    | "the"
+                    | "about"
+                    | "for"
+                    | "of"
+                    | "to"
+                    | "in"
+                    | "on"
+                    | "and"
+                    | "or"
+                    | "is"
+                    | "was"
+                    | "are"
+                    | "can"
+                    | "you"
+                    | "i"
+                    | "me"
+                    | "my"
+                    | "find"
+                    | "show"
+                    | "please"
+                    | "question"
+                    | "questions"
+                    | "conversation"
+                    | "conversations"
+                    | "discussion"
+                    | "chat"
+            )
+        })
         .collect::<Vec<_>>();
-    if query_words.is_empty() {
+    if words.is_empty() {
         return 0.0;
     }
-
-    let text = text.to_lowercase();
-    let matches = query_words
-        .iter()
-        .filter(|word| text.contains(word.as_str()))
-        .count();
-    0.2 * matches as f32 / query_words.len() as f32
+    let content_query = words.join(" ");
+    let matches = crate::semantic::evidence::matched_terms(&content_query, text).len();
+    0.2 * matches as f32 / words.len() as f32
 }
 
 #[cfg(test)]
@@ -484,5 +512,22 @@ mod tests {
 
         assert_eq!(hits[0].explanation.evidence_preview, "alpha Vec<T> x < y");
         assert_eq!(hits[0].snippet, "alpha Vec<T> x < y");
+    }
+}
+
+#[cfg(test)]
+mod retrieval_regressions {
+    use super::*;
+    #[test]
+    fn query_framing_does_not_dilute_named_entities_or_match_substrings() {
+        assert_eq!(
+            lexical_overlap("question about isovis", "Isovis uses vanilla JavaScript."),
+            0.2
+        );
+        assert_eq!(
+            lexical_overlap("question about isovis", "A question about cooking."),
+            0.0
+        );
+        assert_eq!(lexical_overlap("red", "fired"), 0.0);
     }
 }

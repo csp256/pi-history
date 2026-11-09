@@ -207,6 +207,8 @@ pub enum ContentBlock {
     },
     #[allow(dead_code)]
     Image {
+        // Native Pi uses data/mimeType; Claude history uses source.
+        #[serde(default)]
         source: serde_json::Value,
     },
     /// Unknown content block type.
@@ -491,5 +493,15 @@ pub fn normalize_entry(entry: LogEntry) -> Option<LogEntry> {
             _ => Some(LogEntry::Unknown),
         },
         other => Some(other),
+    }
+}
+
+#[cfg(test)]
+mod native_image_regression {
+    use super::*;
+    #[test]
+    fn native_images_do_not_hide_adjacent_text_from_search() {
+        let message:UserMessage=serde_json::from_value(serde_json::json!({"role":"user","content":[{"type":"text","text":"question about isovis"},{"type":"image","data":"AA==","mimeType":"image/png"}]})).unwrap();
+        assert_eq!(extract_text_from_user(&message), "question about isovis");
     }
 }

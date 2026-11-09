@@ -5,6 +5,22 @@ pub enum SemanticTurnRole {
 }
 
 pub fn filter_turn(role: SemanticTurnRole, turn: &str) -> Option<String> {
+    // Pi goal prompts are task wrappers, not conversation topics. Keep the
+    // user's objective while dropping the repeated control instructions.
+    let turn = if role == SemanticTurnRole::User
+        && turn.trim_start().starts_with("Goal mode is active.")
+        && turn.contains("<!-- pi-goal-prompt:")
+    {
+        let Some((_, rest)) = turn.split_once("<goal_objective>") else {
+            return None;
+        };
+        let Some((objective, _)) = rest.split_once("</goal_objective>") else {
+            return None;
+        };
+        objective
+    } else {
+        turn
+    };
     let turn = slash_command_args(turn).unwrap_or(turn);
     let without_fences = strip_markdown_code_fences(turn);
     let without_tags = strip_structural_tag_spans(&without_fences);
@@ -33,11 +49,41 @@ fn strip_markdown_code_fences(text: &str) -> String {
             rest = "";
             break;
         };
+        let block = &after_open[..end];
+        if let Some(command) = short_shell_command(block) {
+            output.push(' ');
+            output.push_str(command);
+            output.push(' ');
+        }
         rest = &after_open[end + 3..];
     }
 
     output.push_str(rest);
     output
+}
+
+/// Keep compact command answers, not source files, logs, or UI mockups.
+fn short_shell_command(block: &str) -> Option<&str> {
+    let (language, body) = block.split_once('\n')?;
+    let body = body.trim();
+    if body.is_empty() || body.len() > 800 || body.lines().count() > 6 {
+        return None;
+    }
+    let shell = matches!(
+        language.trim().to_ascii_lowercase().as_str(),
+        "sh" | "bash" | "zsh" | "fish" | "shell" | "powershell" | "pwsh"
+    );
+    let bare_command = language.trim().is_empty()
+        && body.lines().count() == 1
+        && body.split_whitespace().next().is_some_and(|word| {
+            word.chars()
+                .all(|c| c.is_ascii_lowercase() || matches!(c, '-' | '_' | '/' | '.'))
+        })
+        && body
+            .split_whitespace()
+            .skip(1)
+            .any(|word| word.starts_with('-') || word == "|");
+    (shell || bare_command).then_some(body)
 }
 
 fn strip_structural_tag_spans(text: &str) -> String {
@@ -325,5 +371,41 @@ mod tests {
 
         assert!(filtered.contains("race condition"));
         assert!(filtered.contains("cache signature"));
+    }
+}
+
+#[cfg(test)]
+mod retrieval_regressions {
+    use super::*;
+
+    #[test]
+    fn goal_prompts_keep_objectives_not_controller_boilerplate() {
+        let text = "Goal mode is active. Complete this goal fully:\n<goal_objective>Improve Isovis rendering.</goal_objective>\nGoal-mode rules: keep working, call goal_complete, goal_wait...\n<!-- pi-goal-prompt:example -->";
+        assert_eq!(
+            filter_turn(SemanticTurnRole::User, text).as_deref(),
+            Some("Improve Isovis rendering.")
+        );
+        assert!(
+            filter_turn(
+                SemanticTurnRole::User,
+                "Goal mode is active. missing objective <!-- pi-goal-prompt:example -->"
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn short_cli_answers_are_searchable_but_large_scripts_stay_out() {
+        for fence in ["sh", "bash", ""] {
+            let text = format!("Use this:\n```{fence}\nlines --depth 2 -d\n```");
+            let result = filter_turn(SemanticTurnRole::Assistant, &text).unwrap();
+            assert!(result.contains("lines --depth 2 -d"));
+            assert!(!result.contains("```"));
+        }
+        let script = format!("Explanation.\n```bash\n{}\n```", "echo noisy\n".repeat(20));
+        assert_eq!(
+            filter_turn(SemanticTurnRole::Assistant, &script).as_deref(),
+            Some("Explanation.")
+        );
     }
 }

@@ -14,8 +14,8 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const CACHE_MAGIC: [u8; 8] = *b"CLHIST01";
-// Reparse existing sessions to discover Pi session_info names.
-const SCHEMA_VERSION: u32 = 10;
+// Reparse native images, goal objectives, and short shell-command answers.
+const SCHEMA_VERSION: u32 = 11;
 
 #[derive(Serialize, Deserialize)]
 struct ProjectCache {
