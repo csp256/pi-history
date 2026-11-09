@@ -30,7 +30,10 @@ impl App {
         match parse_conversation_file(&path) {
             Ok(entries) => {
                 let entries = Arc::new(entries);
-                let rendered = render_parsed_conversation(&entries, &options);
+                let mut rendered = render_parsed_conversation(&entries, &options);
+                if self.reverse_history {
+                    rendered.reverse_messages();
+                }
                 let total_lines = rendered.lines.len();
                 let first_msg = if rendered.messages.is_empty() {
                     None
@@ -47,6 +50,7 @@ impl App {
                     tool_display: self.tool_display,
                     show_thinking: self.show_thinking,
                     show_timing: self.show_timing,
+                    reverse_history: self.reverse_history,
                     content_width,
                     search_mode: ViewSearchMode::Off,
                     search_query: String::new(),
@@ -239,7 +243,11 @@ impl App {
         let follow_tail = automatic
             && !state.message_nav_active
             && state.search_mode == ViewSearchMode::Off
-            && state.scroll_offset >= state.total_lines.saturating_sub(viewport_height);
+            && if state.reverse_history {
+                state.scroll_offset == 0
+            } else {
+                state.scroll_offset >= state.total_lines.saturating_sub(viewport_height)
+            };
         // Stamp before reading: an append during parsing is noticed on the next poll.
         let file_stamp = FileStamp::read(&state.conversation_path).ok();
         // Read before replacing the snapshot so failures leave the view intact.
@@ -251,7 +259,11 @@ impl App {
                 self.re_render_view(viewport_height);
                 if follow_tail {
                     if let AppMode::View(state) = &mut self.app_mode {
-                        state.scroll_offset = state.total_lines.saturating_sub(viewport_height);
+                        state.scroll_offset = if state.reverse_history {
+                            0
+                        } else {
+                            state.total_lines.saturating_sub(viewport_height)
+                        };
                     }
                     self.sync_focus_after_scroll(viewport_height);
                 }
@@ -271,6 +283,23 @@ impl App {
                     self.status_message = Some((message, std::time::Instant::now()));
                 }
             }
+        }
+    }
+
+    pub(super) fn toggle_view_order(&mut self, viewport_height: usize) {
+        let AppMode::View(state) = &mut self.app_mode else {
+            return;
+        };
+        state.reverse_history = !state.reverse_history;
+        self.reverse_history = state.reverse_history;
+        state.hovered_tool_output = None;
+        self.re_render_view(viewport_height);
+        // Show the beginning of the newly selected order: newest or oldest.
+        if let AppMode::View(state) = &mut self.app_mode {
+            state.scroll_offset = 0;
+            state.focused_message = (!state.message_ranges.is_empty()).then_some(0);
+            state.message_nav_active = false;
+            state.current_match = 0;
         }
     }
 
@@ -345,7 +374,10 @@ impl App {
                     }
                 }
             };
-            let rendered = render_parsed_conversation(&entries, &options);
+            let mut rendered = render_parsed_conversation(&entries, &options);
+            if state.reverse_history {
+                rendered.reverse_messages();
+            }
             state.total_lines = rendered.lines.len();
             state.rendered_lines = rendered.lines;
             state.message_ranges = rendered.messages;
@@ -692,14 +724,25 @@ fn capture_anchor(
 }
 
 fn find_message_idx_or_prev(ranges: &[MessageRange], entry_index: usize) -> Option<usize> {
-    if ranges.is_empty() {
-        return None;
-    }
-    match ranges.binary_search_by_key(&entry_index, |m| m.entry_index) {
-        Ok(idx) => Some(idx),
-        Err(0) => Some(0),
-        Err(idx) => Some(idx - 1),
-    }
+    // Ranges follow screen order, which can now be descending by entry_index.
+    ranges
+        .iter()
+        .position(|message| message.entry_index == entry_index)
+        .or_else(|| {
+            ranges
+                .iter()
+                .enumerate()
+                .filter(|(_, message)| message.entry_index < entry_index)
+                .max_by_key(|(_, message)| message.entry_index)
+                .map(|(index, _)| index)
+        })
+        .or_else(|| {
+            ranges
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, message)| message.entry_index)
+                .map(|(index, _)| index)
+        })
 }
 
 pub fn line_matches_query(line: &RenderedLine, query_lower: &str) -> bool {

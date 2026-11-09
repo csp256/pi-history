@@ -130,6 +130,7 @@ the preview.
 | `t`            | Cycle tools: summary/off/truncated/full            |
 | `d`            | Toggle edit diffs                                  |
 | `T`            | Toggle thinking                                    |
+| `o`            | Toggle oldest-first / newest-first messages         |
 | `a`            | Toggle auto-reload (once a second)                  |
 | `r`            | Reload the open session from disk                  |
 | `e`            | Export conversation to file                        |
@@ -240,6 +241,13 @@ conversations in a ledger-style format with scrolling support.
   navigate matches
 - **Cycle tools**: Press `t` to cycle tool display (summary → off → truncated → full)
 - **Toggle edit diffs**: Press `d` to show/hide full old/new edit diff bodies
+- **Message order**: Press `o` to toggle oldest-first / newest-first (`order·old` /
+  `order·new`). Only whole message blocks are reversed; text, code, and tool
+  details inside each message keep their normal reading order. Toggling starts
+  at the top of the selected order. Oldest-first remains the default; set
+  `reverse_history = true` under `[display]` for newest-first on startup.
+  Auto-reload follows the top in newest-first mode, unless you scroll away or
+  are searching/navigating messages. Source files and full exports stay chronological.
 - **Reload**: Press `r` to read new messages from disk while an agent is running.
   Reload preserves your reading position, display settings, and expanded outputs,
   and updates active search matches.
@@ -488,6 +496,9 @@ show_thinking = false
 # Show timestamps in the viewer (info toggle; default: true)
 # show_info = true
 
+# Display newest messages first (default: false; press o to toggle)
+# reverse_history = true
+
 # Auto-reload the open session once a second (default: false; press a to toggle)
 # auto_reload = true
 
@@ -537,6 +548,7 @@ EOF
 - `show_thinking` (boolean): Show thinking blocks in conversation output
   (default: false)
 - `show_info` (boolean): Show timestamps in the viewer (the `i` / info toggle; default: true).
+- `reverse_history` (boolean): Display whole messages newest-first (default: false; press `o` to toggle).
 - `auto_reload` (boolean): Poll the open session for changes once a second (default: false; press `a` to toggle).
 - `edit_diffs` (boolean): Show old/new diffs in edit tool calls (default: false; press `d` in the viewer to toggle)
 - `plain` (boolean): Output plain text without ledger formatting (default:

@@ -77,6 +77,8 @@ pub struct App {
     show_timing: bool,
     /// Whether the open viewer polls for changes.
     auto_reload: bool,
+    /// Persistent viewer order preference.
+    reverse_history: bool,
     last_auto_reload_check: Option<std::time::Instant>,
     /// Whether the app is running in single file mode (direct input, no list)
     single_file_mode: bool,
@@ -149,6 +151,7 @@ impl App {
             show_thinking: parts.show_thinking,
             show_timing: true,
             auto_reload: false,
+            reverse_history: false,
             last_auto_reload_check: None,
             single_file_mode: parts.single_file_mode,
             keys: parts.keys,
@@ -357,6 +360,14 @@ impl App {
         self.show_timing = enabled;
         if let AppMode::View(state) = &mut self.app_mode {
             state.show_timing = enabled;
+        }
+    }
+
+    /// Apply startup order before the first frame is rendered.
+    pub fn set_initial_reverse_history(&mut self, enabled: bool) {
+        self.reverse_history = enabled;
+        if let AppMode::View(state) = &mut self.app_mode {
+            state.reverse_history = enabled;
         }
     }
 

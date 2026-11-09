@@ -143,6 +143,8 @@ pub struct DisplayConfig {
     pub show_info: Option<bool>,
     /// Poll the open session for changes once a second (default: false).
     pub auto_reload: Option<bool>,
+    /// Display whole messages newest-first (default: false; viewer order toggle).
+    pub reverse_history: Option<bool>,
     pub edit_diffs: Option<bool>,
     pub plain: Option<bool>,
     pub pager: Option<bool>,

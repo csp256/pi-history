@@ -1478,3 +1478,91 @@ fn tool_display_cli_accepts_off_and_rejects_conflicting_flags() {
     }
     assert!(crate::cli::Args::try_parse_from(["pi-history", "--tool-display", "invalid"]).is_err());
 }
+
+#[test]
+fn reversing_messages_preserves_bodies_ranges_and_tool_metadata_in_all_modes() {
+    let entries: Vec<_> = [
+        r#"{"type":"user","message":{"role":"user","content":"Old first line\n\nOld second line"}}"#,
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"read1","name":"Read","input":{"file_path":"example.rs"}}]}}"#,
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"read1","content":"Result first\nResult second"}]}}"#,
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Newest message\n\n```rust\nlet first = 1;\nlet second = 2;\n```"}]}}"#,
+    ].into_iter().enumerate().map(|(entry_index, json)| RenderableEntry {
+        entry_index, entry: serde_json::from_str(json).unwrap(),
+    }).collect();
+    for mode in [
+        ToolDisplayMode::Off,
+        ToolDisplayMode::Hidden,
+        ToolDisplayMode::Truncated,
+        ToolDisplayMode::Full,
+    ] {
+        let mut options = test_render_options(mode);
+        options
+            .expanded_tool_outputs
+            .insert(make_tool_summary_output_id(1, None));
+        let mut rendered = render_parsed_conversation(&entries, &options);
+        let original_lines = format!("{:?}", rendered.lines);
+        let original_ranges = format!("{:?}", rendered.messages);
+        let blocks: Vec<_> = rendered
+            .messages
+            .iter()
+            .map(|message| {
+                (
+                    message.entry_index,
+                    format!(
+                        "{:?}",
+                        &rendered.lines[message.start_line..message.end_line]
+                    ),
+                )
+            })
+            .collect();
+        rendered.reverse_messages();
+        assert_eq!(rendered.messages.len(), blocks.len());
+        for (message, (entry_index, lines)) in rendered.messages.iter().zip(blocks.iter().rev()) {
+            assert_eq!(message.entry_index, *entry_index);
+            assert_eq!(
+                format!(
+                    "{:?}",
+                    &rendered.lines[message.start_line..message.end_line]
+                ),
+                *lines
+            );
+        }
+        assert!(
+            rendered
+                .messages
+                .windows(2)
+                .all(|pair| pair[0].end_line <= pair[1].start_line)
+        );
+        let text = rendered_text(&rendered);
+        assert!(text.find("Newest message").unwrap() < text.find("Old first line").unwrap());
+        assert!(text.find("let first").unwrap() < text.find("let second").unwrap());
+        assert!(text.find("Old first line").unwrap() < text.find("Old second line").unwrap());
+        rendered.reverse_messages();
+        assert_eq!(format!("{:?}", rendered.lines), original_lines);
+        assert_eq!(format!("{:?}", rendered.messages), original_ranges);
+    }
+}
+
+#[test]
+fn reversing_empty_or_single_message_is_a_noop() {
+    for text in [None, Some("Single message")] {
+        let entries = text
+            .map(|text| RenderableEntry {
+                entry_index: 0,
+                entry: serde_json::from_value(
+                    serde_json::json!({"type":"user","message":{"role":"user","content":text}}),
+                )
+                .unwrap(),
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
+        let mut rendered =
+            render_parsed_conversation(&entries, &test_render_options(ToolDisplayMode::Off));
+        let before = format!("{:?}{:?}", rendered.lines, rendered.messages);
+        rendered.reverse_messages();
+        assert_eq!(
+            format!("{:?}{:?}", rendered.lines, rendered.messages),
+            before
+        );
+    }
+}
