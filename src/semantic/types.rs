@@ -11,7 +11,8 @@ pub const DEFAULT_CHUNK_OVERLAP_CHARS: usize = 300;
 pub const DEFAULT_CHUNK_CONTEXT_TURNS: usize = 1;
 // Bound attention scratch memory, especially while other agents are running.
 pub const DEFAULT_EMBEDDING_BATCH_SIZE: usize = 8;
-pub const CACHE_SCHEMA_VERSION: u32 = 3;
+// BGE query instruction / unprefixed passages replace the old E5-style prefixes.
+pub const CACHE_SCHEMA_VERSION: u32 = 4;
 pub const MODEL_NAME: &str = "BGESmallENV15";
 
 #[derive(Clone, Debug, Default)]

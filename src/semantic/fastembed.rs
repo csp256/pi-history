@@ -78,15 +78,13 @@ impl SemanticEmbedder for FastembedEmbedder {
     }
 }
 
+// BGE retrieval uses this instruction on queries and plain, unprefixed passages.
 pub fn prefixed_query(query: &str) -> String {
-    format!("query: {query}")
+    format!("Represent this sentence for searching relevant passages: {query}")
 }
 
 pub fn prefixed_passages(passages: &[String]) -> Vec<String> {
-    passages
-        .iter()
-        .map(|passage| format!("passage: {passage}"))
-        .collect()
+    passages.to_vec()
 }
 
 fn to_config_error(err: impl std::fmt::Display) -> AppError {
@@ -99,14 +97,17 @@ mod tests {
 
     #[test]
     fn prefixes_query_for_fastembed() {
-        assert_eq!(prefixed_query("rust cache"), "query: rust cache");
+        assert_eq!(
+            prefixed_query("rust cache"),
+            "Represent this sentence for searching relevant passages: rust cache"
+        );
     }
 
     #[test]
     fn prefixes_passages_for_fastembed() {
         assert_eq!(
             prefixed_passages(&["one".to_string(), "two".to_string()]),
-            vec!["passage: one".to_string(), "passage: two".to_string()]
+            vec!["one".to_string(), "two".to_string()]
         );
     }
 }
@@ -129,6 +130,60 @@ mod model_smoke_tests {
             .unwrap()
             .unwrap();
         let dot = |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(a, b)| a * b).sum::<f32>();
+        // Regressions for the user's actual query shapes, through filtering,
+        // real embeddings, and the same ranker as the TUI.
+        let examples = [
+            "hey isovis is pretty much just straight vanilla js, but with threejs, right? Yes: Isovis is vanilla JavaScript using Three.js for rendering.",
+            "Use this:\n```sh\nlines --depth 2 -d\n```",
+            "A question about a conversation about asking questions and getting answers.",
+            "Roast carrots and potatoes in a hot oven.",
+        ];
+        let texts = examples
+            .iter()
+            .map(|text| {
+                crate::semantic::filter::filter_turn(
+                    crate::semantic::filter::SemanticTurnRole::Assistant,
+                    text,
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let vectors = model.embed_passages(&texts).unwrap();
+        let chunks = texts
+            .into_iter()
+            .zip(vectors)
+            .enumerate()
+            .map(
+                |(index, (text, embedding))| crate::semantic::types::EmbeddedChunk {
+                    conversation_index: index,
+                    source: crate::semantic::types::SemanticChunkSource::VisibleDialogue,
+                    session: index.to_string(),
+                    chunk_index: 0,
+                    key: index.to_string(),
+                    text,
+                    message_range: crate::agent::refs::MessageRange::single(1),
+                    embedding,
+                },
+            )
+            .collect::<Vec<_>>();
+        for (query, expected) in [
+            ("question about isovis", 0),
+            ("cli command for counting lines", 1),
+        ] {
+            let vector = model.embed_query(query).unwrap().unwrap();
+            let hits = crate::semantic::rank::rank_chunks(
+                query,
+                &vector,
+                &chunks,
+                &crate::semantic::types::SemanticCancellationToken::new(),
+            )
+            .unwrap();
+            assert_eq!(
+                hits[0].conversation_index, expected,
+                "query {query}: {hits:?}"
+            );
+        }
+
         assert!(dot(&query, &embeddings[0]) > dot(&query, &embeddings[1]));
         for round in 0..2 {
             let texts = (0..17)

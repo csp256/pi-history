@@ -198,8 +198,12 @@ equally relevant results, recent conversations rank first.
 ### Semantic search
 
 Semantic search ranks conversations by meaning instead of exact word matches. It
-embeds recent conversation chunks locally, combines semantic similarity with
-lexical signals, and shows the best matching evidence preview for each result.
+embeds cleaned conversation chunks locally, combines semantic similarity with
+word-boundary-aware keyword signals, and shows the best matching evidence preview.
+Natural phrases such as `question about isovis` work without requiring every
+framing word to appear in the conversation. Short shell-command answers remain
+searchable, including fenced commands; bulk source files, tool logs, and generated
+goal-controller instructions are excluded (the user-provided goal is retained).
 The first semantic search may download the local model and generate embeddings,
 which can take a while for large histories.
 
@@ -224,8 +228,11 @@ configs.
 This fork pins FastEmbed 5.12.1 / ONNX Runtime 1.23.2 as a workaround for reported
 `GetElementType is not implemented` kernel failures in the 1.24.2 bundle.
 Embedding inference uses two shared, non-spinning CPU workers and batches of eight
-to limit CPU and attention-memory pressure. The model and embedding format are
-unchanged; existing caches remain usable. No history/cache deletion is needed.
+to limit CPU and attention-memory pressure. The BGE model files remain unchanged.
+Retrieval now uses BGE's query instruction and unprefixed passages rather than E5
+prefixes. Old parsed-history and embedding caches are refreshed automatically;
+**the first semantic search after updating may need time to rebuild its index**.
+No history/cache deletion or model re-download is needed.
 
 Model-backed checks are opt-in (ordinary tests do not download models):
 
