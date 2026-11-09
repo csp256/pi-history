@@ -135,7 +135,7 @@ fn attrs_to_line_style(attrs: &crate::markdown::layout::Attrs) -> LineStyle {
     }
 }
 
-/// Apply italic and dimmed styling to thinking block content
+/// Give thinking prose its muted color without overwriting Markdown accents.
 pub(super) fn apply_thinking_style(styled_lines: Vec<StyledLine>) -> Vec<StyledLine> {
     styled_lines
         .into_iter()
@@ -145,7 +145,7 @@ pub(super) fn apply_thinking_style(styled_lines: Vec<StyledLine>) -> Vec<StyledL
                 .into_iter()
                 .map(|(text, mut style)| {
                     style.italic = true;
-                    style.fg = Some(th().thinking_text);
+                    style.fg.get_or_insert(th().thinking_text);
                     (text, style)
                 })
                 .collect(),

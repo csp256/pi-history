@@ -12,7 +12,7 @@ with tempfile.TemporaryDirectory() as home:
         with path.open('a') as f:f.write(json.dumps(entry)+'\n')
     append({'type':'session','id':'ansi-test','cwd':str(home)})
     for i in range(35):append({'type':'user','message':{'role':'user','content':f'EARLIER_{i:03}'}})
-    append({'type':'assistant','message':{'role':'assistant','content':[{'type':'text','text':'**Normal markdown stays**'},{'type':'thinking','thinking':'\x1b[31m**ANSI_RED**\x1b[39m normal\n\x1b[38;2;1;2;3;48;5;21;4mANSI_RGB\x1b[0m\n\x1b]52;c;CLIPBOARD_SECRET\x07\x1b[2JTHINK_LAST'}]}})
+    append({'type':'assistant','message':{'role':'assistant','content':[{'type':'text','text':'### TEXT_HEADING\n\n**Normal markdown stays**'},{'type':'thinking','thinking':'### THINK_HEADING\n\n\x1b[31m**ANSI_RED**\x1b[39m normal\n\x1b[38;2;1;2;3;48;5;21;4mANSI_RGB\x1b[0m\n\x1b]52;c;CLIPBOARD_SECRET\x07\x1b[2JTHINK_LAST'}]}})
     def run(args, expected=True, exercise=False):
         screen=pyte.Screen(180,25); stream=pyte.Stream(screen)
         master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',25,180,0,0))
@@ -41,6 +41,9 @@ with tempfile.TemporaryDirectory() as home:
                 assert cell('ANSI_RED').bold
                 assert '**ANSI_RED**' not in text
                 assert cell('Normal markdown stays').bold
+                for marker in ['TEXT_HEADING','THINK_HEADING']:
+                    assert cell(marker).fg=='cd9a22',cell(marker)
+                    assert cell(marker).bold
                 assert cell('ANSI_RGB').fg=='010203',cell('ANSI_RGB')
                 assert cell('ANSI_RGB').bg=='0000ff',cell('ANSI_RGB')
                 assert cell('ANSI_RGB').underscore
