@@ -225,7 +225,7 @@ impl App {
         if let AppMode::View(ref mut state) = self.app_mode {
             state.tool_display = state.tool_display.next();
             self.tool_display = state.tool_display;
-            self.re_render_view(viewport_height);
+            self.re_render_view_after_settings(viewport_height);
         }
     }
 
@@ -233,13 +233,13 @@ impl App {
         if let AppMode::View(ref mut state) = self.app_mode {
             state.show_thinking = !state.show_thinking;
             self.show_thinking = state.show_thinking;
-            self.re_render_view(viewport_height);
+            self.re_render_view_after_settings(viewport_height);
         }
     }
 
     pub(super) fn toggle_view_edit_diffs(&mut self, viewport_height: usize) {
         let enabled = crate::tool_format::toggle_render_edit_diffs();
-        self.re_render_view(viewport_height);
+        self.re_render_view_after_settings(viewport_height);
         self.status_message = Some((
             format!("Edit diffs {}", if enabled { "shown" } else { "hidden" }),
             std::time::Instant::now(),
@@ -250,7 +250,27 @@ impl App {
         if let AppMode::View(ref mut state) = self.app_mode {
             state.show_timing = !state.show_timing;
             self.show_timing = state.show_timing;
-            self.re_render_view(viewport_height);
+            self.re_render_view_after_settings(viewport_height);
+        }
+    }
+
+    /// Settings can reveal more lines after the currently visible latest message.
+    /// Keep the latest edge pinned only when the reader was already there.
+    fn re_render_view_after_settings(&mut self, viewport_height: usize) {
+        let at_latest = match &self.app_mode {
+            AppMode::View(state) if state.reverse_history => state.scroll_offset == 0,
+            AppMode::View(state) => {
+                state.scroll_offset >= state.total_lines.saturating_sub(viewport_height)
+            }
+            AppMode::List => false,
+        };
+        self.re_render_view(viewport_height);
+        if at_latest && let AppMode::View(state) = &mut self.app_mode {
+            state.scroll_offset = if state.reverse_history {
+                0
+            } else {
+                state.total_lines.saturating_sub(viewport_height)
+            };
         }
     }
 
