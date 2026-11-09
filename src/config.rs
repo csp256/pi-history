@@ -141,7 +141,7 @@ pub struct DisplayConfig {
     pub show_thinking: Option<bool>,
     /// Show timestamps in the viewer (the info toggle).
     pub show_info: Option<bool>,
-    /// Poll the open session for changes once a second (default: false).
+    /// Poll the open session for changes once a second (default: true).
     pub auto_reload: Option<bool>,
     /// Display whole messages newest-first (default: false; viewer order toggle).
     pub reverse_history: Option<bool>,
@@ -166,6 +166,10 @@ impl DisplayConfig {
 
     pub fn show_info(&self) -> bool {
         self.show_info.unwrap_or(true)
+    }
+
+    pub fn auto_reload(&self) -> bool {
+        self.auto_reload.unwrap_or(true)
     }
 
     pub fn edit_diffs(&self) -> bool {
@@ -388,6 +392,8 @@ mod viewer_defaults_tests {
             assert!(!display.show_thinking());
             assert!(!display.edit_diffs()); // Footer action: diff·show.
             assert!(display.show_info());
+            assert!(display.auto_reload());
+            assert!(!display.reverse_history.unwrap_or(false));
         }
         assert_eq!(ToolDisplayMode::default(), ToolDisplayMode::Off);
     }
@@ -395,13 +401,14 @@ mod viewer_defaults_tests {
     #[test]
     fn explicit_config_overrides_fork_defaults() {
         let config: ConfigFile = toml::from_str(
-            "[display]\ntool_display = \"truncated\"\nshow_thinking = true\nedit_diffs = true\nshow_info = false\n",
+            "[display]\ntool_display = \"truncated\"\nshow_thinking = true\nedit_diffs = true\nshow_info = false\nauto_reload = false\n",
         ).unwrap();
         let display = config.display.unwrap();
         assert_eq!(display.tool_display_mode(), ToolDisplayMode::Truncated);
         assert!(display.show_thinking());
         assert!(display.edit_diffs());
         assert!(!display.show_info());
+        assert!(!display.auto_reload());
     }
 
     #[test]
