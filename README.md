@@ -243,6 +243,9 @@ conversations in a ledger-style format with scrolling support.
   navigate matches
 - **Cycle tools**: Press `t` to cycle tool display (summary → off → truncated → full)
 - **Toggle edit diffs**: Press `d` to show/hide full old/new edit diff bodies
+- **Settings position**: Changing tools, thinking, diffs, or info keeps you at the
+  latest message if you were already there (bottom in oldest-first, top in
+  newest-first). If you scrolled away, your reading position stays anchored.
 - **Message order**: Press `o` to toggle oldest-first / newest-first (`order·old` /
   `order·new`). Only whole message blocks are reversed; text, code, and tool
   details inside each message keep their normal reading order. Toggling starts

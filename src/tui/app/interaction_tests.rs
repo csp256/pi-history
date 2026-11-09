@@ -1095,3 +1095,134 @@ fn single_file_opening_position_handles_chronological_reversed_and_short_session
         }
     }
 }
+
+fn write_settings_session(path: &std::path::Path, long: bool) {
+    use std::io::Write;
+    write_named_conversation(path, "Oldest text");
+    if long {
+        for i in 0..30 {
+            append_reload_message(path, &format!("Earlier message {i}"));
+        }
+    }
+    let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+    writeln!(file, "{}", serde_json::json!({"type":"assistant","message":{"role":"assistant","content":[
+        {"type":"text","text":"Latest answer"},
+        {"type":"thinking","thinking":"Long reasoning paragraph. ".repeat(100)},
+        {"type":"tool_use","id":"settings-call","name":"Bash","input":{"command":"command line\n".repeat(40)}}
+    ]}})).unwrap();
+    writeln!(file, "{}", serde_json::json!({"type":"user","message":{"role":"user","content":[
+        {"type":"tool_result","tool_use_id":"settings-call","content":"result line\n".repeat(40)}
+    ]}})).unwrap();
+}
+
+#[test]
+fn settings_keep_latest_edge_pinned_in_both_orders_for_growing_and_shrinking_views() {
+    for reverse in [false, true] {
+        for long in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("session.jsonl");
+            write_settings_session(&path, long);
+            let mut app =
+                App::new_single_file(path, ToolDisplayMode::Off, false, KeyBindings::default());
+            app.set_initial_reverse_history(reverse);
+            app.check_view_resize(80, 8);
+            app.apply_initial_view_position(8);
+            // Exercise tools through all four modes, plus thinking and info on/off.
+            for key in ['t', 't', 't', 't', 'T', 'T', 'i', 'i'] {
+                app.handle_key(KeyCode::Char(key), KeyModifiers::NONE, 8);
+                let AppMode::View(state) = app.app_mode() else {
+                    unreachable!()
+                };
+                assert_eq!(
+                    state.scroll_offset,
+                    if reverse {
+                        0
+                    } else {
+                        state.total_lines.saturating_sub(8)
+                    },
+                    "reverse={reverse}, long={long}, key={key}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn settings_away_from_latest_preserve_message_and_relative_reading_position() {
+    for reverse in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        write_settings_session(&path, true);
+        let mut app =
+            App::new_single_file(path, ToolDisplayMode::Off, false, KeyBindings::default());
+        app.set_initial_reverse_history(reverse);
+        app.check_view_resize(80, 8);
+        app.apply_initial_view_position(8);
+        if let AppMode::View(state) = &mut app.app_mode {
+            state.scroll_offset = 20;
+        }
+        let (entry, relative) = match app.app_mode() {
+            AppMode::View(state) => {
+                let message = state
+                    .message_ranges
+                    .iter()
+                    .find(|m| m.start_line >= state.scroll_offset)
+                    .unwrap();
+                (
+                    message.entry_index,
+                    message.start_line as isize - state.scroll_offset as isize,
+                )
+            }
+            _ => unreachable!(),
+        };
+        for key in ['t', 't', 't', 't', 'T', 'T', 'i', 'i'] {
+            app.handle_key(KeyCode::Char(key), KeyModifiers::NONE, 8);
+            let AppMode::View(state) = app.app_mode() else {
+                unreachable!()
+            };
+            let message = state
+                .message_ranges
+                .iter()
+                .find(|m| m.entry_index == entry)
+                .unwrap();
+            assert_eq!(
+                message.start_line as isize - state.scroll_offset as isize,
+                relative,
+                "reverse={reverse}, key={key}"
+            );
+        }
+    }
+}
+
+#[test]
+fn settings_at_latest_keep_search_state_and_continue_auto_following() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    write_settings_session(&path, true);
+    let mut app = App::new_single_file(
+        path.clone(),
+        ToolDisplayMode::Off,
+        false,
+        KeyBindings::default(),
+    );
+    app.check_view_resize(80, 8);
+    app.apply_initial_view_position(8);
+    if let AppMode::View(state) = &mut app.app_mode {
+        state.search_mode = ViewSearchMode::Active;
+        state.search_query = "Latest answer".to_string();
+    }
+    app.handle_key(KeyCode::Char('t'), KeyModifiers::NONE, 8);
+    let AppMode::View(state) = app.app_mode() else {
+        unreachable!()
+    };
+    assert_eq!(state.scroll_offset, state.total_lines.saturating_sub(8));
+    assert_eq!(state.search_matches.len(), 1);
+    app.clear_view_search();
+    append_reload_message(&path, "Still following updates");
+    app.check_auto_reload(8);
+    let AppMode::View(state) = app.app_mode() else {
+        unreachable!()
+    };
+    assert_eq!(state.scroll_offset, state.total_lines.saturating_sub(8));
+    assert!(view_text(&app).contains("Still following updates"));
+}
