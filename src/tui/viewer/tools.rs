@@ -89,7 +89,7 @@ pub(super) fn tool_result_display_text(content: Option<&serde_json::Value>) -> S
 /// Descriptor for one tool-call rendering pass shared by entry and
 /// summary-expansion render paths.
 pub(super) struct ToolCallRenderSpec<'a> {
-    pub render_ansi: bool,
+    pub formatting: bool,
     pub name: &'a str,
     pub input: &'a serde_json::Value,
     pub label: &'a str,
@@ -105,7 +105,7 @@ pub(super) struct ToolCallRenderSpec<'a> {
 /// Descriptor for one tool-result rendering pass shared by entry and
 /// summary-expansion render paths.
 pub(super) struct ToolResultRenderSpec<'a> {
-    pub render_ansi: bool,
+    pub formatting: bool,
     pub text: &'a str,
     pub content_width: usize,
     pub timing: TimingSlot<'a>,
@@ -116,7 +116,7 @@ pub(super) struct ToolResultRenderSpec<'a> {
 /// Render a formatted tool call with proper styling
 pub(super) fn render_tool_call(lines: &mut Vec<RenderedLine>, spec: &ToolCallRenderSpec<'_>) {
     let ToolCallRenderSpec {
-        render_ansi,
+        formatting,
         name,
         input,
         label,
@@ -128,7 +128,7 @@ pub(super) fn render_tool_call(lines: &mut Vec<RenderedLine>, spec: &ToolCallRen
         tool_output_id,
         expanded,
     } = *spec;
-    let ansi_width = render_ansi.then_some(content_width);
+    let ansi_width = (content_width, formatting);
     let formatted = tool_format::format_tool_call(name, input, content_width);
 
     let header_content = vec![(
@@ -221,19 +221,19 @@ fn render_tool_body(
     timing: TimingSlot<'_>,
     tool_output_id: Option<&ToolOutputId>,
     clickable: bool,
-    ansi_width: Option<usize>,
+    ansi_width: (usize, bool),
 ) {
-    if let Some(width) = ansi_width
-        && super::ansi::has_ansi(text)
-    {
-        push_ansi_rows(
-            lines,
-            super::ansi::render(text, width),
-            timing,
-            tool_output_id,
-            clickable,
-            true,
-        );
+    if super::ansi::has_ansi(text) {
+        let (width, formatting) = ansi_width;
+        let mut rows = super::ansi::render(text, width);
+        if !formatting {
+            for row in &mut rows {
+                for (_, style) in &mut row.spans {
+                    style.ansi = None;
+                }
+            }
+        }
+        push_ansi_rows(lines, rows, timing, tool_output_id, clickable, true);
         return;
     }
     for line in text.lines() {
@@ -302,7 +302,7 @@ fn push_ansi_rows(
 /// Render tool result with arrow indicator and markdown
 pub(super) fn render_tool_result(lines: &mut Vec<RenderedLine>, spec: &ToolResultRenderSpec<'_>) {
     let ToolResultRenderSpec {
-        render_ansi,
+        formatting,
         text,
         content_width,
         timing,
@@ -312,13 +312,13 @@ pub(super) fn render_tool_result(lines: &mut Vec<RenderedLine>, spec: &ToolResul
     } = *spec;
     // Fence plain text tool results to prevent markdown misinterpretation.
     // If the result already contains fenced code blocks, assume it's intentional markdown.
-    let text = if text.contains("```") || (render_ansi && super::ansi::has_ansi(text)) {
+    let text = if !formatting || text.contains("```") {
         text.to_string()
     } else {
         format!("```text\n{}\n```", text)
     };
     // Render markdown
-    let styled_lines = render_text_to_lines(&text, content_width, render_ansi);
+    let styled_lines = render_text_to_lines(&text, content_width, formatting);
 
     let total = styled_lines.len();
     let limit = if tool_display == ToolDisplayMode::Truncated
@@ -390,8 +390,15 @@ pub(super) fn render_dimmed_tool_result_body(
     timing: TimingSlot<'_>,
 ) {
     let truncated_mode = options.tool_display == ToolDisplayMode::Truncated;
-    if options.render_ansi && super::ansi::has_ansi(content_str) {
+    if super::ansi::has_ansi(content_str) {
         let mut rows = super::ansi::render(content_str, options.content_width);
+        if !options.formatting {
+            for row in &mut rows {
+                for (_, style) in &mut row.spans {
+                    style.ansi = None;
+                }
+            }
+        }
         let total = rows.len();
         let limit = if truncated_mode && !expanded {
             total.min(TRUNCATED_RESULT_LINES)

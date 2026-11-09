@@ -320,7 +320,7 @@ fn rendered_text(conversation: &RenderedConversation) -> String {
 
 fn test_render_options(tool_display: ToolDisplayMode) -> RenderOptions {
     RenderOptions {
-        render_ansi: false,
+        formatting: true,
         tool_display,
         show_thinking: false,
         show_timing: false,
@@ -571,7 +571,7 @@ fn tool_call_metadata_tracks_truncated_and_expanded_state() {
     render_tool_call(
         &mut lines,
         &ToolCallRenderSpec {
-            render_ansi: false,
+            formatting: true,
             name: "Bash",
             input: &input,
             label: "Pi",
@@ -600,7 +600,7 @@ fn tool_call_metadata_tracks_truncated_and_expanded_state() {
     render_tool_call(
         &mut expanded,
         &ToolCallRenderSpec {
-            render_ansi: false,
+            formatting: true,
             name: "Bash",
             input: &input,
             label: "Pi",
@@ -1575,7 +1575,7 @@ fn ansi_thinking_is_styled_before_wrapping_and_theme_does_not_override_it() {
     let entries=vec![RenderableEntry{entry_index:0,entry:serde_json::from_value(serde_json::json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"\u{1b}[31mRED\u{1b}[39m normal"}]}})).unwrap()}];
     let mut options = test_render_options(ToolDisplayMode::Off);
     options.show_thinking = true;
-    options.render_ansi = true;
+    options.formatting = true;
     let rendered = render_parsed_conversation(&entries, &options);
     let text = rendered_text(&rendered);
     assert!(text.contains("RED normal"));
@@ -1592,7 +1592,7 @@ fn ansi_thinking_is_styled_before_wrapping_and_theme_does_not_override_it() {
         red.1.ansi.unwrap().fg,
         Some(ratatui::style::Color::Indexed(1))
     );
-    options.render_ansi = false;
+    options.formatting = false;
     let raw = render_parsed_conversation(&entries, &options);
     assert!(
         raw.lines
@@ -1606,7 +1606,7 @@ fn ansi_thinking_is_styled_before_wrapping_and_theme_does_not_override_it() {
 fn ansi_tool_result_truncation_and_expansion_keep_output_identity() {
     let entries=vec![RenderableEntry{entry_index:0,entry:serde_json::from_value(serde_json::json!({"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ansi-tool","content":"\u{1b}[32mone\ntwo\nthree\nfour\nfive\u{1b}[0m"}]}})).unwrap()}];
     let mut options = test_render_options(ToolDisplayMode::Truncated);
-    options.render_ansi = true;
+    options.formatting = true;
     let short = render_parsed_conversation(&entries, &options);
     let text = rendered_text(&short);
     assert!(text.contains("one"));
@@ -1631,7 +1631,7 @@ fn ansi_tool_result_truncation_and_expansion_keep_output_identity() {
 #[test]
 fn enabling_ansi_does_not_change_ordinary_markdown() {
     let text = "# Heading\n\n**bold** and `code`\n\n- list";
-    let raw = super::markdown::render_text_to_lines(text, 40, false);
+    let raw = super::markdown::render_markdown_to_lines(text, 40);
     let enabled = super::markdown::render_text_to_lines(text, 40, true);
     let spans = |lines: Vec<super::markdown::StyledLine>| {
         lines
@@ -1645,4 +1645,76 @@ fn enabling_ansi_does_not_change_ordinary_markdown() {
             .collect::<Vec<_>>()
     };
     assert_eq!(spans(raw), spans(enabled));
+}
+
+#[test]
+fn combined_formatting_renders_markdown_inside_ansi_and_midword_color_changes() {
+    use ratatui::style::Color;
+    let lines = super::markdown::render_text_to_lines(
+        "\x1b[31m**wo\x1b[32mrds**\x1b[39m and `code`",
+        80,
+        true,
+    );
+    let spans: Vec<_> = lines.iter().flat_map(|line| &line.spans).collect();
+    assert_eq!(
+        spans
+            .iter()
+            .map(|(text, _)| text.as_str())
+            .collect::<String>(),
+        "words and code"
+    );
+    for (text, color) in [("wo", Color::Indexed(1)), ("rds", Color::Indexed(2))] {
+        let (_, style) = spans.iter().find(|(value, _)| value == text).unwrap();
+        assert!(style.bold);
+        assert_eq!(style.ansi.unwrap().fg, Some(color));
+    }
+}
+
+#[test]
+fn combined_formatting_maps_repeated_links_entities_and_code_to_their_own_source() {
+    use ratatui::style::Color;
+    let input = "\x1b[31m[same](https://example.com/same)\x1b[0m \x1b[32msame &amp; green\x1b[0m\n\n```text\n\x1b[34mcode **literal**\x1b[0m\n```";
+    let lines = super::markdown::render_text_to_lines(input, 80, true);
+    let spans: Vec<_> = lines.iter().flat_map(|line| &line.spans).collect();
+    let same: Vec<_> = spans
+        .iter()
+        .filter(|(text, _)| text.contains("same"))
+        .collect();
+    assert_eq!(same[0].1.ansi.unwrap().fg, Some(Color::Indexed(1)));
+    assert_eq!(same[1].1.ansi.unwrap().fg, Some(Color::Indexed(2)));
+    assert!(spans.iter().any(
+        |(text, style)| text.contains('&') && style.ansi.unwrap().fg == Some(Color::Indexed(2))
+    ));
+    assert!(
+        spans
+            .iter()
+            .any(|(text, style)| text.contains("**literal**")
+                && style.ansi.unwrap().fg == Some(Color::Indexed(4)))
+    );
+}
+
+#[test]
+fn formatting_off_preserves_markdown_but_never_replays_terminal_controls() {
+    let lines = super::markdown::render_text_to_lines(
+        "\x1b[31m**words**\x1b[0m\n`code`\x1b]52;c;SECRET\x07",
+        80,
+        false,
+    );
+    let text = lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|(text, _)| text.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(text, "**words**\n`code`");
+    assert!(
+        lines
+            .iter()
+            .flat_map(|line| &line.spans)
+            .all(|(_, style)| style.ansi.is_none() && !style.bold)
+    );
 }

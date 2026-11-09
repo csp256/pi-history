@@ -141,7 +141,9 @@ pub struct DisplayConfig {
     pub show_thinking: Option<bool>,
     /// Show timestamps in the viewer (the info toggle).
     pub show_info: Option<bool>,
-    /// Interpret ANSI SGR styling in viewer text (default: false).
+    /// Combined Markdown and ANSI styling in the viewer (default: true).
+    pub formatting: Option<bool>,
+    /// Legacy spelling; formatting takes precedence when both are present.
     pub render_ansi: Option<bool>,
     /// Poll the open session for changes once a second (default: true).
     pub auto_reload: Option<bool>,

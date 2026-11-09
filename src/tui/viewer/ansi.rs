@@ -94,8 +94,8 @@ fn sgr(style: &mut Style, parameters: &str) {
     }
 }
 
-/// ANSI-bearing blocks are terminal-styled text, not Markdown. Control bytes have
-/// zero layout width; colors carry across soft wraps/newlines but not across blocks.
+/// Decode styles into safe plain text before Markdown composition. Control bytes
+/// have zero width; colors carry across soft wraps/newlines, not across blocks.
 pub(super) fn render(input: &str, width: usize) -> Vec<StyledLine> {
     let width = width.max(1);
     let mut lines = vec![StyledLine { spans: Vec::new() }];

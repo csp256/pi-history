@@ -310,7 +310,7 @@ fn step_user_text(
         }
     };
     let Some(text) = text else { return false };
-    let md_lines = render_text_to_lines(&text, ctx.options.content_width, ctx.options.render_ansi);
+    let md_lines = render_text_to_lines(&text, ctx.options.content_width, ctx.options.formatting);
     if ctx.style.dimmed {
         render_ledger_block_styled_dimmed(
             lines,
@@ -349,7 +349,7 @@ fn step_assistant_text(
             continue;
         }
         let md_lines =
-            render_text_to_lines(text, ctx.options.content_width, ctx.options.render_ansi);
+            render_text_to_lines(text, ctx.options.content_width, ctx.options.formatting);
         if ctx.style.dimmed {
             render_ledger_block_styled_dimmed(
                 lines,
@@ -396,11 +396,8 @@ fn step_aggregated_text(
         return false;
     }
     let combined = texts.join("\n\n");
-    let md_lines = render_text_to_lines(
-        &combined,
-        ctx.options.content_width,
-        ctx.options.render_ansi,
-    );
+    let md_lines =
+        render_text_to_lines(&combined, ctx.options.content_width, ctx.options.formatting);
     render_ledger_block_styled_dimmed(
         lines,
         &ctx.style.label,
@@ -464,7 +461,7 @@ fn step_tool_calls(
         render_tool_call(
             lines,
             &ToolCallRenderSpec {
-                render_ansi: ctx.options.render_ansi,
+                formatting: ctx.options.formatting,
                 name,
                 input,
                 label: &ctx.style.label,
@@ -500,7 +497,7 @@ fn step_thinking(
             continue;
         }
         let md_lines =
-            render_text_to_lines(thinking, ctx.options.content_width, ctx.options.render_ansi);
+            render_text_to_lines(thinking, ctx.options.content_width, ctx.options.formatting);
         let styled_lines = apply_thinking_style(md_lines);
         render_ledger_block_styled(
             lines,
@@ -556,7 +553,7 @@ fn step_user_tool_results(
             render_tool_result(
                 lines,
                 &ToolResultRenderSpec {
-                    render_ansi: ctx.options.render_ansi,
+                    formatting: ctx.options.formatting,
                     text: &content_str,
                     content_width: ctx.options.content_width,
                     timing: timing.consume(),

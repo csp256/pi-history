@@ -111,7 +111,7 @@ pub struct ViewState {
     pub show_thinking: bool,
     /// Whether to show timing information (timestamps + durations)
     pub show_timing: bool,
-    pub render_ansi: bool,
+    pub formatting: bool,
     /// Newest message first; message bodies keep their normal reading order.
     pub reverse_history: bool,
     /// Content width used for rendering (for resize detection)
@@ -186,7 +186,7 @@ impl ViewState {
             tool_display,
             show_thinking,
             show_timing,
-            render_ansi: false,
+            formatting: true,
             reverse_history: false,
             content_width,
             search_mode: ViewSearchMode::Off,
