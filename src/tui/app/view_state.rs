@@ -22,7 +22,7 @@ impl App {
             tool_display: self.tool_display,
             show_thinking: self.show_thinking,
             show_timing: self.show_timing,
-            render_ansi: self.render_ansi,
+            formatting: self.formatting,
             content_width,
             expanded_tool_outputs: BTreeSet::new(),
         };
@@ -52,7 +52,7 @@ impl App {
                     tool_display: self.tool_display,
                     show_thinking: self.show_thinking,
                     show_timing: self.show_timing,
-                    render_ansi: self.render_ansi,
+                    formatting: self.formatting,
                     reverse_history: self.reverse_history,
                     content_width,
                     search_mode: ViewSearchMode::Off,
@@ -231,10 +231,10 @@ impl App {
         }
     }
 
-    pub(super) fn toggle_view_ansi(&mut self, viewport_height: usize) {
+    pub(super) fn toggle_view_formatting(&mut self, viewport_height: usize) {
         if let AppMode::View(state) = &mut self.app_mode {
-            state.render_ansi = !state.render_ansi;
-            self.render_ansi = state.render_ansi;
+            state.formatting = !state.formatting;
+            self.formatting = state.formatting;
             self.re_render_view_after_settings(viewport_height);
         }
     }
@@ -400,7 +400,7 @@ impl App {
                 tool_display: state.tool_display,
                 show_thinking: state.show_thinking,
                 show_timing: state.show_timing,
-                render_ansi: state.render_ansi,
+                formatting: state.formatting,
                 content_width: state.content_width,
                 expanded_tool_outputs: state.expanded_tool_outputs.clone(),
             };

@@ -12,7 +12,7 @@ with tempfile.TemporaryDirectory() as home:
         with path.open('a') as f:f.write(json.dumps(entry)+'\n')
     append({'type':'session','id':'ansi-test','cwd':str(home)})
     for i in range(35):append({'type':'user','message':{'role':'user','content':f'EARLIER_{i:03}'}})
-    append({'type':'assistant','message':{'role':'assistant','content':[{'type':'text','text':'**Normal markdown stays**'},{'type':'thinking','thinking':'\x1b[31mANSI_RED\x1b[39m normal\n\x1b[38;2;1;2;3;48;5;21;4mANSI_RGB\x1b[0m\n\x1b]52;c;CLIPBOARD_SECRET\x07\x1b[2JTHINK_LAST'}]}})
+    append({'type':'assistant','message':{'role':'assistant','content':[{'type':'text','text':'**Normal markdown stays**'},{'type':'thinking','thinking':'\x1b[31m**ANSI_RED**\x1b[39m normal\n\x1b[38;2;1;2;3;48;5;21;4mANSI_RGB\x1b[0m\n\x1b]52;c;CLIPBOARD_SECRET\x07\x1b[2JTHINK_LAST'}]}})
     def run(args, expected=True, exercise=False):
         screen=pyte.Screen(180,25); stream=pyte.Stream(screen)
         master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',25,180,0,0))
@@ -33,29 +33,41 @@ with tempfile.TemporaryDirectory() as home:
             raise AssertionError(marker+' missing\n'+'\n'.join(screen.display))
         try:
             text=read(1)
-            assert ('ANSI·on' if expected else 'ANSI·off') in text,text
+            assert ('format·on' if expected else 'format·off') in text,text
             if expected:
                 assert 'ANSI_RED' in text and 'ANSI_RGB' in text and 'THINK_LAST' in text,text
                 assert '[39m' not in text and 'CLIPBOARD_SECRET' not in text,text
                 assert cell('ANSI_RED').fg in ('red','cd0000'),cell('ANSI_RED')
+                assert cell('ANSI_RED').bold
+                assert '**ANSI_RED**' not in text
+                assert cell('Normal markdown stays').bold
                 assert cell('ANSI_RGB').fg=='010203',cell('ANSI_RGB')
                 assert cell('ANSI_RGB').bg=='0000ff',cell('ANSI_RGB')
                 assert cell('ANSI_RGB').underscore
                 bottom(text)
+            else:
+                assert '**ANSI_RED**' in text,text
+                assert '[39m' not in text and 'CLIPBOARD_SECRET' not in text,text
+                assert not cell('ANSI_RED').bold
             if exercise:
                 for _ in range(2):
-                    os.write(master,b'A');text=read(.4);bottom(text)
-                assert 'ANSI·on' in text and '[39m' not in text,text
+                    os.write(master,b'f');text=read(.4);bottom(text)
+                assert 'format·on' in text and '[39m' not in text,text
                 append({'type':'user','message':{'role':'user','content':'AFTER_ANSI_PLAIN'}})
                 text=read(1.8);assert 'AFTER_ANSI_PLAIN' in text,text;bottom(text)
                 assert cell('AFTER_ANSI_PLAIN').fg not in ('red','cd0000')
-                os.write(master,b'g');read(.3);os.write(master,b'A');text=read(.4);assert 'EARLIER_000' in text,text
+                os.write(master,b'g');read(.3);os.write(master,b'f');text=read(.4);assert 'EARLIER_000' in text,text
             os.write(master,b'q');proc.wait(timeout=3)
         finally:
             if proc.poll() is None:proc.terminate();proc.wait(timeout=3)
             os.close(master)
-    run(['--show-thinking','--render-ansi'],exercise=True)
-    config=home/'.config/pi-history/config.toml';config.parent.mkdir(parents=True);config.write_text('[display]\nrender_ansi = true\n')
+    run(['--show-thinking'],exercise=True)
+    config=home/'.config/pi-history/config.toml';config.parent.mkdir(parents=True);config.write_text('[display]\nformatting = true\n')
     run(['--show-thinking'])
-    run(['--show-thinking','--no-render-ansi'],expected=False)
-    print('PASS: ANSI foreground/background/RGB/underline; reset cleanup; CSI/OSC filtering; toggle/latest anchoring; live reload; scrolled-away position; config and CLI precedence.')
+    run(['--show-thinking','--no-formatting'],expected=False)
+    config.write_text('[display]\nformatting = false\n')
+    run(['--show-thinking','--formatting'])
+    run(['--show-thinking','--render-ansi'])
+    config.write_text('[display]\nrender_ansi = false\n')
+    run(['--show-thinking'],expected=False)
+    print('PASS: combined Markdown bold and ANSI foreground/background/RGB/underline; reset cleanup; CSI/OSC filtering; toggle/latest anchoring; live reload; scrolled-away position; config and CLI precedence.')

@@ -124,11 +124,11 @@ fn run() -> Result<()> {
         false,
     );
     let show_info = display_config.show_info();
-    let render_ansi = resolve_bool_setting(
-        args.render_ansi,
-        args.no_render_ansi,
-        display_config.render_ansi,
-        false,
+    let formatting = resolve_bool_setting(
+        args.formatting,
+        args.no_formatting,
+        display_config.formatting.or(display_config.render_ansi),
+        true,
     );
     let auto_reload = display_config.auto_reload();
     let reverse_history = display_config.reverse_history.unwrap_or(false);
@@ -294,7 +294,7 @@ fn run() -> Result<()> {
             tool_display,
             show_thinking,
             show_info,
-            render_ansi,
+            formatting,
             auto_reload,
             reverse_history,
             keys,
@@ -335,7 +335,7 @@ fn run() -> Result<()> {
         tool_display,
         show_thinking,
         show_info,
-        render_ansi,
+        formatting,
         auto_reload,
         reverse_history,
         keys,

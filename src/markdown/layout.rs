@@ -35,6 +35,8 @@ pub struct Attrs {
 /// A run of text with uniform attributes.
 #[derive(Clone, Debug)]
 pub struct Run {
+    /// Original input bytes for textual runs; generated chrome has no provenance.
+    pub source_range: Option<std::ops::Range<usize>>,
     pub text: String,
     pub attrs: Attrs,
 }
@@ -86,6 +88,10 @@ impl TableState {
 
 /// Shared markdown layout engine.
 pub struct LayoutEngine {
+    source_input: String,
+    event_source: Option<std::ops::Range<usize>>,
+    source_cursor: usize,
+    code_source: Option<std::ops::Range<usize>>,
     max_width: usize,
     lines: Vec<Line>,
     current_line: Vec<Run>,
@@ -106,6 +112,10 @@ pub struct LayoutEngine {
 impl LayoutEngine {
     pub fn new(max_width: usize) -> Self {
         Self {
+            source_input: String::new(),
+            event_source: None,
+            source_cursor: 0,
+            code_source: None,
             max_width,
             lines: Vec::new(),
             current_line: Vec::new(),
@@ -125,6 +135,15 @@ impl LayoutEngine {
     }
 
     pub fn render(input: &str, max_width: usize) -> LayoutDoc {
+        Self::render_impl(input, max_width, false)
+    }
+
+    /// Retain source byte ranges only when a sink needs external style overlays.
+    pub fn render_with_source(input: &str, max_width: usize) -> LayoutDoc {
+        Self::render_impl(input, max_width, true)
+    }
+
+    fn render_impl(input: &str, max_width: usize, track_source: bool) -> LayoutDoc {
         let mut options = Options::empty();
         options.insert(Options::ENABLE_STRIKETHROUGH);
         options.insert(Options::ENABLE_TABLES);
@@ -132,7 +151,22 @@ impl LayoutEngine {
         let parser = Parser::new_ext(input, options);
         let mut engine = Self::new(max_width);
 
-        for event in parser {
+        if track_source {
+            engine.source_input = input.to_string();
+        }
+        for (event, range) in parser.into_offset_iter() {
+            engine.event_source = if !track_source {
+                None
+            } else {
+                match &event {
+                    Event::Text(_) | Event::Code(_) | Event::Html(_) | Event::InlineHtml(_) => {
+                        Some(range)
+                    }
+                    Event::End(TagEnd::CodeBlock) => engine.code_source.clone(),
+                    _ => None,
+                }
+            };
+            engine.source_cursor = engine.event_source.as_ref().map_or(0, |range| range.start);
             engine.handle_event(event);
         }
 
@@ -192,7 +226,18 @@ impl LayoutEngine {
             return;
         }
         let width = text.width();
+        let source_range = self.event_source.as_ref().map(|range| {
+            let start = self.source_cursor.min(range.end);
+            if let Some(relative) = self.source_input[start..range.end].find(text) {
+                let start = start + relative;
+                self.source_cursor = start + text.len();
+                start..self.source_cursor
+            } else {
+                range.clone()
+            }
+        });
         self.current_line.push(Run {
+            source_range,
             text: text.to_string(),
             attrs,
         });
@@ -215,6 +260,7 @@ impl LayoutEngine {
         if self.current_line.is_empty() {
             self.lines.push(Line {
                 runs: vec![Run {
+                    source_range: None,
                     text: String::new(),
                     attrs: Attrs {
                         code_block_lang: Some(lang.to_string()),
@@ -240,10 +286,12 @@ impl LayoutEngine {
     /// wrapped / soft-broken continuation line.
     fn emit_continuation_prefixes(&mut self) {
         // Clone to avoid borrow conflicts with push_run's &mut self.
+        let source = self.event_source.take();
         let prefixes: Vec<Prefix> = self.prefix_stack.clone();
         for prefix in prefixes {
             self.push_run(&prefix.cont_text, prefix.cont_attrs);
         }
+        self.event_source = source;
     }
 
     fn ensure_blank_line(&mut self) {
@@ -311,6 +359,7 @@ impl LayoutEngine {
                 self.flush_line();
                 self.in_code_block = true;
                 self.code_block_content.clear();
+                self.code_source = None;
                 self.code_block_lang = lang;
             }
             Tag::List(start) => {
@@ -542,6 +591,12 @@ impl LayoutEngine {
         }
 
         if self.in_code_block {
+            if let Some(range) = &self.event_source {
+                match &mut self.code_source {
+                    Some(source) => source.end = range.end,
+                    None => self.code_source = Some(range.clone()),
+                }
+            }
             self.code_block_content.push_str(&text);
             return;
         }
@@ -681,6 +736,7 @@ fn render_table_to_lines(rows: &[Vec<String>], _max_width: usize) -> Vec<Line> {
     // Top border
     lines.push(Line {
         runs: vec![Run {
+            source_range: None,
             text: build_line(tl, tj, tr),
             attrs: border_attrs.clone(),
         }],
@@ -690,6 +746,7 @@ fn render_table_to_lines(rows: &[Vec<String>], _max_width: usize) -> Vec<Line> {
         // Row content
         let mut runs = Vec::new();
         runs.push(Run {
+            source_range: None,
             text: v.to_string(),
             attrs: border_attrs.clone(),
         });
@@ -698,16 +755,19 @@ fn render_table_to_lines(rows: &[Vec<String>], _max_width: usize) -> Vec<Line> {
             let cell_width = cell.width();
             let padding = width.saturating_sub(cell_width);
             runs.push(Run {
+                source_range: None,
                 text: format!(" {} ", cell),
                 attrs: Attrs::default(),
             });
             if padding > 0 {
                 runs.push(Run {
+                    source_range: None,
                     text: " ".repeat(padding),
                     attrs: Attrs::default(),
                 });
             }
             runs.push(Run {
+                source_range: None,
                 text: v.to_string(),
                 attrs: border_attrs.clone(),
             });
@@ -718,6 +778,7 @@ fn render_table_to_lines(rows: &[Vec<String>], _max_width: usize) -> Vec<Line> {
         if row_idx < rows.len() - 1 {
             lines.push(Line {
                 runs: vec![Run {
+                    source_range: None,
                     text: build_line(lj, cj, rj),
                     attrs: border_attrs.clone(),
                 }],
@@ -728,6 +789,7 @@ fn render_table_to_lines(rows: &[Vec<String>], _max_width: usize) -> Vec<Line> {
     // Bottom border
     lines.push(Line {
         runs: vec![Run {
+            source_range: None,
             text: build_line(bl, bj, br),
             attrs: border_attrs.clone(),
         }],

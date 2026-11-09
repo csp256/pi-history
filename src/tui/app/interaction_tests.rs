@@ -1438,12 +1438,12 @@ fn ansi_toggle_keeps_latest_edge_and_survives_reload_in_both_orders() {
                 }
             );
         }
-        app.set_initial_render_ansi(true);
+        app.set_initial_formatting(true);
         app.handle_key(KeyCode::Char('r'), KeyModifiers::NONE, 8);
         let AppMode::View(state) = app.app_mode() else {
             panic!("view expected")
         };
-        assert!(state.render_ansi);
+        assert!(state.formatting);
     }
 }
 
@@ -1453,21 +1453,61 @@ fn ansi_startup_setting_applies_to_picker_and_single_file_without_changing_defau
     let path = dir.path().join("session.jsonl");
     write_conversation(&path, None);
     let mut list = app_with_conversation(path.clone(), None);
-    assert!(!list.render_ansi);
-    list.set_initial_render_ansi(true);
+    assert!(list.formatting);
+    list.set_initial_formatting(true);
     list.enter_view_mode(80);
     let AppMode::View(state) = list.app_mode() else {
         panic!("view expected")
     };
-    assert!(state.render_ansi);
+    assert!(state.formatting);
     let mut single =
         App::new_single_file(path, ToolDisplayMode::Off, false, KeyBindings::default());
-    single.set_initial_render_ansi(true);
+    single.set_initial_formatting(true);
     let AppMode::View(state) = single.app_mode() else {
         panic!("view expected")
     };
-    assert!(state.render_ansi);
+    assert!(state.formatting);
     let config: crate::config::ConfigFile =
-        toml::from_str("[display]\nrender_ansi = true\n").unwrap();
-    assert_eq!(config.display.unwrap().render_ansi, Some(true));
+        toml::from_str("[display]\nformatting = true\n").unwrap();
+    assert_eq!(config.display.unwrap().formatting, Some(true));
+}
+
+#[test]
+fn formatting_defaults_on_and_f_toggles_both_markdown_and_ansi() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    write_named_conversation(&path, "\u{1b}[31m**words**\u{1b}[0m");
+    let mut app = App::new_single_file(path, ToolDisplayMode::Off, false, KeyBindings::default());
+    app.check_view_resize(80, 8);
+    let spans = |app: &App| {
+        let AppMode::View(state) = app.app_mode() else {
+            panic!("view")
+        };
+        state
+            .rendered_lines
+            .iter()
+            .flat_map(|line| line.spans.clone())
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        spans(&app)
+            .iter()
+            .any(|(text, style)| text == "words" && style.bold && style.ansi.is_some())
+    );
+    app.handle_key(KeyCode::Char('f'), KeyModifiers::NONE, 8);
+    assert!(
+        spans(&app)
+            .iter()
+            .any(|(text, style)| text.contains("**words**") && !style.bold && style.ansi.is_none())
+    );
+    app.handle_key(KeyCode::Char('A'), KeyModifiers::SHIFT, 8);
+    assert!(
+        spans(&app)
+            .iter()
+            .any(|(text, style)| text == "words" && style.bold)
+    );
+    let config: crate::config::ConfigFile =
+        toml::from_str("[display]\nformatting = false\nrender_ansi = true\n").unwrap();
+    let display = config.display.unwrap();
+    assert_eq!(display.formatting.or(display.render_ansi), Some(false));
 }

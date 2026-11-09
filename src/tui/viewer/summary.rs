@@ -254,7 +254,7 @@ fn render_summary_group_details(
                         render_tool_call(
                             lines,
                             &ToolCallRenderSpec {
-                                render_ansi: options.render_ansi,
+                                formatting: options.formatting,
                                 name,
                                 input,
                                 label: &label,
@@ -301,7 +301,7 @@ fn render_summary_group_details(
                         render_tool_result(
                             lines,
                             &ToolResultRenderSpec {
-                                render_ansi: options.render_ansi,
+                                formatting: options.formatting,
                                 text: &content_str,
                                 content_width: options.content_width,
                                 timing: pad_timing,

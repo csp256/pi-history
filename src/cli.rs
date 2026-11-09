@@ -268,13 +268,13 @@ pub struct Args {
     #[arg(long, group = "thinking_display")]
     pub show_thinking: bool,
 
-    /// Interpret ANSI colors/styles in TUI text and thinking traces
-    #[arg(long, conflicts_with = "no_render_ansi")]
-    pub render_ansi: bool,
+    /// Render Markdown and ANSI styling in the TUI viewer (default: on)
+    #[arg(long, alias = "render-ansi", conflicts_with = "no_formatting")]
+    pub formatting: bool,
 
-    /// Leave ANSI interpretation disabled in the TUI viewer
-    #[arg(long, conflicts_with = "render_ansi")]
-    pub no_render_ansi: bool,
+    /// Show literal Markdown with ANSI controls stripped in the TUI viewer
+    #[arg(long, alias = "no-render-ansi", conflicts_with = "formatting")]
+    pub no_formatting: bool,
 
     /// Hide thinking blocks and subagent internals from the conversation output
     #[arg(long, group = "thinking_display")]

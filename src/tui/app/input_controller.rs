@@ -343,10 +343,10 @@ impl App {
                 self.toggle_view_timing(viewport_height);
                 None
             }
-            KeyCode::Char('A')
+            KeyCode::Char('f' | 'A')
                 if !modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
             {
-                self.toggle_view_ansi(viewport_height);
+                self.toggle_view_formatting(viewport_height);
                 None
             }
             KeyCode::Char('m') if modifiers.is_empty() => {
