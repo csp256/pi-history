@@ -141,6 +141,8 @@ pub struct DisplayConfig {
     pub show_thinking: Option<bool>,
     /// Show timestamps in the viewer (the info toggle).
     pub show_info: Option<bool>,
+    /// Poll the open session for changes once a second (default: false).
+    pub auto_reload: Option<bool>,
     pub edit_diffs: Option<bool>,
     pub plain: Option<bool>,
     pub pager: Option<bool>,

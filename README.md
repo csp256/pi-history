@@ -130,6 +130,7 @@ the preview.
 | `t`            | Cycle tools: summary/off/truncated/full            |
 | `d`            | Toggle edit diffs                                  |
 | `T`            | Toggle thinking                                    |
+| `a`            | Toggle auto-reload (once a second)                  |
 | `r`            | Reload the open session from disk                  |
 | `e`            | Export conversation to file                        |
 | `y`            | Copy to clipboard (message if selected, else menu) |
@@ -241,7 +242,12 @@ conversations in a ledger-style format with scrolling support.
 - **Toggle edit diffs**: Press `d` to show/hide full old/new edit diff bodies
 - **Reload**: Press `r` to read new messages from disk while an agent is running.
   Reload preserves your reading position, display settings, and expanded outputs,
-  and updates active search matches. There is no automatic live refresh.
+  and updates active search matches.
+- **Auto-reload**: Press `a` to toggle polling for changes about once a second
+  (`auto·on` / `auto·off` in the footer). It follows new messages if you are at the
+  bottom, but preserves your position when reading earlier messages, navigating
+  messages, or searching. It is off by default; set `auto_reload = true` under
+  `[display]` to enable it on startup. Works in both picker and direct-file views.
 - **Toggle thinking**: Press `T` to show/hide thinking blocks
 - **Show path**: Press `p` to display the conversation file path
 - **Light/dark theme**: Automatically detects terminal background color and
@@ -482,6 +488,9 @@ show_thinking = false
 # Show timestamps in the viewer (info toggle; default: true)
 # show_info = true
 
+# Auto-reload the open session once a second (default: false; press a to toggle)
+# auto_reload = true
+
 # Show old/new diffs in edit tool calls (default: false; press d in viewer)
 edit_diffs = false
 
@@ -528,6 +537,7 @@ EOF
 - `show_thinking` (boolean): Show thinking blocks in conversation output
   (default: false)
 - `show_info` (boolean): Show timestamps in the viewer (the `i` / info toggle; default: true).
+- `auto_reload` (boolean): Poll the open session for changes once a second (default: false; press `a` to toggle).
 - `edit_diffs` (boolean): Show old/new diffs in edit tool calls (default: false; press `d` in the viewer to toggle)
 - `plain` (boolean): Output plain text without ledger formatting (default:
   false)

@@ -45,6 +45,23 @@ pub enum AppMode {
     View(ViewState),
 }
 
+/// Cheap change detection for the snapshot currently displayed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct FileStamp {
+    modified: Option<std::time::SystemTime>,
+    len: u64,
+}
+
+impl FileStamp {
+    pub(super) fn read(path: &std::path::Path) -> std::io::Result<Self> {
+        let metadata = std::fs::metadata(path)?;
+        Ok(Self {
+            modified: metadata.modified().ok(),
+            len: metadata.len(),
+        })
+    }
+}
+
 /// State for the conversation viewer
 #[derive(Clone, Debug)]
 pub struct ViewState {
@@ -52,6 +69,7 @@ pub struct ViewState {
     pub conversation_path: PathBuf,
     /// Parsed renderable entries for the currently open view.
     pub parsed_entries: Option<Arc<Vec<RenderableEntry>>>,
+    pub(super) file_stamp: Option<FileStamp>,
     /// Current scroll position (line offset)
     pub scroll_offset: usize,
     /// Pre-rendered conversation lines
@@ -126,6 +144,7 @@ impl ViewState {
         content_width: usize,
     ) -> Self {
         Self {
+            file_stamp: FileStamp::read(&conversation_path).ok(),
             conversation_path,
             parsed_entries: None,
             scroll_offset: 0,

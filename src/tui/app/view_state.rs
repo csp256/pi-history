@@ -1,3 +1,4 @@
+use super::types::FileStamp;
 use super::{App, AppMode, DialogMode, ViewSearchMode, ViewState};
 use crate::tui::ui;
 use crate::tui::viewer::{MessageRange, RenderOptions, RenderedLine, ToolOutputId};
@@ -25,6 +26,7 @@ impl App {
             expanded_tool_outputs: BTreeSet::new(),
         };
 
+        let file_stamp = FileStamp::read(&path).ok();
         match parse_conversation_file(&path) {
             Ok(entries) => {
                 let entries = Arc::new(entries);
@@ -38,6 +40,7 @@ impl App {
                 self.app_mode = AppMode::View(ViewState {
                     conversation_path: path,
                     parsed_entries: Some(entries),
+                    file_stamp,
                     scroll_offset: 0,
                     rendered_lines: rendered.lines,
                     total_lines,
@@ -226,25 +229,84 @@ impl App {
     }
 
     pub(super) fn reload_view(&mut self, viewport_height: usize) {
+        self.reload_view_from_disk(viewport_height, false);
+    }
+
+    fn reload_view_from_disk(&mut self, viewport_height: usize, automatic: bool) {
         let AppMode::View(state) = &mut self.app_mode else {
             return;
         };
+        let follow_tail = automatic
+            && !state.message_nav_active
+            && state.search_mode == ViewSearchMode::Off
+            && state.scroll_offset >= state.total_lines.saturating_sub(viewport_height);
+        // Stamp before reading: an append during parsing is noticed on the next poll.
+        let file_stamp = FileStamp::read(&state.conversation_path).ok();
         // Read before replacing the snapshot so failures leave the view intact.
         match crate::tui::viewer::parse_conversation_file(&state.conversation_path) {
             Ok(entries) => {
                 state.parsed_entries = Some(Arc::new(entries));
+                state.file_stamp = file_stamp;
                 state.hovered_tool_output = None;
-                // Reuse anchor restoration and active-search recomputation.
                 self.re_render_view(viewport_height);
-                self.status_message =
-                    Some(("Session reloaded".to_string(), std::time::Instant::now()));
+                if follow_tail {
+                    if let AppMode::View(state) = &mut self.app_mode {
+                        state.scroll_offset = state.total_lines.saturating_sub(viewport_height);
+                    }
+                    self.sync_focus_after_scroll(viewport_height);
+                }
+                // Background refreshes must not continually obscure the shortcut bar.
+                if !automatic {
+                    self.status_message =
+                        Some(("Session reloaded".to_string(), std::time::Instant::now()));
+                }
             }
             Err(error) => {
-                self.status_message = Some((
-                    format!("Failed to reload session: {error}"),
-                    std::time::Instant::now(),
-                ));
+                let message = format!("Failed to reload session: {error}");
+                if self
+                    .status_message
+                    .as_ref()
+                    .is_none_or(|(previous, _)| previous != &message)
+                {
+                    self.status_message = Some((message, std::time::Instant::now()));
+                }
             }
+        }
+    }
+
+    pub fn auto_reload(&self) -> bool {
+        self.auto_reload
+    }
+
+    pub fn set_auto_reload(&mut self, enabled: bool) {
+        self.auto_reload = enabled;
+        self.last_auto_reload_check = None;
+    }
+
+    /// Time until the next check; None lets idle list/manual viewers sleep normally.
+    pub fn auto_reload_wait(&self) -> Option<std::time::Duration> {
+        if !self.auto_reload || !matches!(self.app_mode, AppMode::View(_)) {
+            return None;
+        }
+        let interval = std::time::Duration::from_secs(1);
+        Some(
+            self.last_auto_reload_check
+                .map_or(std::time::Duration::ZERO, |last| {
+                    interval.saturating_sub(last.elapsed())
+                }),
+        )
+    }
+
+    pub fn check_auto_reload(&mut self, viewport_height: usize) {
+        if self.auto_reload_wait() != Some(std::time::Duration::ZERO) {
+            return;
+        }
+        self.last_auto_reload_check = Some(std::time::Instant::now());
+        let AppMode::View(state) = &self.app_mode else {
+            return;
+        };
+        if FileStamp::read(&state.conversation_path).ok() != state.file_stamp {
+            self.reload_view_from_disk(viewport_height, true);
         }
     }
 
@@ -270,14 +332,18 @@ impl App {
 
             let entries = match state.parsed_entries.clone() {
                 Some(entries) => entries,
-                None => match parse_conversation_file(&state.conversation_path) {
-                    Ok(entries) => {
-                        let entries = Arc::new(entries);
-                        state.parsed_entries = Some(entries.clone());
-                        entries
+                None => {
+                    let file_stamp = FileStamp::read(&state.conversation_path).ok();
+                    match parse_conversation_file(&state.conversation_path) {
+                        Ok(entries) => {
+                            let entries = Arc::new(entries);
+                            state.parsed_entries = Some(entries.clone());
+                            state.file_stamp = file_stamp;
+                            entries
+                        }
+                        Err(_) => return,
                     }
-                    Err(_) => return,
-                },
+                }
             };
             let rendered = render_parsed_conversation(&entries, &options);
             state.total_lines = rendered.lines.len();
