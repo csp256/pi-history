@@ -9,7 +9,8 @@ use std::sync::{
 pub const DEFAULT_CHUNK_TARGET_CHARS: usize = 2_400;
 pub const DEFAULT_CHUNK_OVERLAP_CHARS: usize = 300;
 pub const DEFAULT_CHUNK_CONTEXT_TURNS: usize = 1;
-pub const DEFAULT_EMBEDDING_BATCH_SIZE: usize = 32;
+// Bound attention scratch memory, especially while other agents are running.
+pub const DEFAULT_EMBEDDING_BATCH_SIZE: usize = 8;
 pub const CACHE_SCHEMA_VERSION: u32 = 3;
 pub const MODEL_NAME: &str = "BGESmallENV15";
 

@@ -3,6 +3,7 @@ use crate::semantic::embed::SemanticEmbedder;
 use crate::semantic::types::DEFAULT_EMBEDDING_BATCH_SIZE;
 use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 pub struct FastembedEmbedder {
     model: TextEmbedding,
@@ -25,6 +26,7 @@ impl FastembedEmbedder {
         cache_dir: PathBuf,
         show_download_progress: bool,
     ) -> Result<Self> {
+        configure_runtime()?;
         let model = TextEmbedding::try_new(
             TextInitOptions::new(EmbeddingModel::BGESmallENV15)
                 .with_cache_dir(cache_dir)
@@ -33,6 +35,25 @@ impl FastembedEmbedder {
         .map_err(to_config_error)?;
         Ok(Self { model })
     }
+}
+
+/// Share two non-spinning CPU workers instead of creating a full-machine pool
+/// for every embedding session. This also bounds memory use during indexing.
+fn configure_runtime() -> Result<()> {
+    static INITIALIZED: OnceLock<std::result::Result<(), String>> = OnceLock::new();
+    INITIALIZED
+        .get_or_init(|| {
+            let pool = ort::environment::GlobalThreadPoolOptions::default()
+                .with_intra_threads(2)
+                .and_then(|pool| pool.with_inter_threads(1))
+                .and_then(|pool| pool.with_spin_control(false))
+                .map_err(|error| error.to_string())?;
+            ort::init().with_global_thread_pool(pool).commit();
+            Ok(())
+        })
+        .as_ref()
+        .map_err(to_config_error)
+        .copied()
 }
 
 impl SemanticEmbedder for FastembedEmbedder {
@@ -87,5 +108,58 @@ mod tests {
             prefixed_passages(&["one".to_string(), "two".to_string()]),
             vec!["passage: one".to_string(), "passage: two".to_string()]
         );
+    }
+}
+
+#[cfg(test)]
+mod model_smoke_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "runs the real local embedding model; may download model files"]
+    fn real_model_semantic_smoke() {
+        let mut model = FastembedEmbedder::new_quiet().unwrap();
+        let passages=vec![
+            "Persistent authentication stores a refresh credential in a secure cookie so users stay signed in across browser restarts.".to_string(),
+            "Roast vegetables in a hot oven with olive oil and salt until tender.".to_string(),
+        ];
+        let embeddings = model.embed_passages(&passages).unwrap();
+        let query = model
+            .embed_query("keeping a web session logged in after closing the browser")
+            .unwrap()
+            .unwrap();
+        let dot = |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(a, b)| a * b).sum::<f32>();
+        assert!(dot(&query, &embeddings[0]) > dot(&query, &embeddings[1]));
+        for round in 0..2 {
+            let texts = (0..17)
+                .map(|i| {
+                    if i % 2 == 0 {
+                        "A long conversation about authentication and refresh cookies. ".repeat(150)
+                    } else {
+                        "Short text.".to_string()
+                    }
+                })
+                .collect::<Vec<_>>();
+            let vectors = model.embed_passages(&texts).unwrap();
+            assert_eq!(vectors.len(), texts.len());
+            for vector in vectors
+                .iter()
+                .chain(&embeddings)
+                .chain(std::iter::once(&query))
+            {
+                assert_eq!(vector.len(), 384);
+                assert!(vector.iter().all(|value| value.is_finite()));
+                assert!((dot(vector, vector) - 1.0).abs() < 0.001);
+            }
+            assert!(
+                model
+                    .embed_query("a different query after indexing")
+                    .unwrap()
+                    .is_some()
+            );
+            eprintln!(
+                "Real-model smoke round {round}: semantic ordering, mixed lengths, batch boundaries, and query-after-indexing passed"
+            );
+        }
     }
 }

@@ -219,6 +219,23 @@ mode = "semantic"
 The older `[tui] semantic_search = true` setting is still accepted for existing
 configs.
 
+#### Runtime compatibility
+
+This fork pins FastEmbed 5.12.1 / ONNX Runtime 1.23.2 as a workaround for reported
+`GetElementType is not implemented` kernel failures in the 1.24.2 bundle.
+Embedding inference uses two shared, non-spinning CPU workers and batches of eight
+to limit CPU and attention-memory pressure. The model and embedding format are
+unchanged; existing caches remain usable. No history/cache deletion is needed.
+
+Model-backed checks are opt-in (ordinary tests do not download models):
+
+- `just semantic-smoke` tests actual embeddings and relevant-vs-unrelated ranking;
+  it may download the model on the first run.
+- `just semantic-app-smoke` tests semantic/hybrid CLI results and TUI prewarming
+  and search using isolated synthetic history. Requires cached model files and a
+  macOS/Linux terminal environment. Pass an installed binary path to test it.
+
+
 ### Direct file input
 
 You can open a JSONL conversation file directly, bypassing the conversation

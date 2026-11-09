@@ -56,3 +56,11 @@ bridge-test:
 # macOS/Linux terminal smoke test for ANSI trace styling
 ansi-smoke binary="target/debug/pi-history":
     uv run tests/ansi_smoke.py "{{binary}}"
+
+# Opt-in test of real embeddings (may download the model; use two CPU slots)
+semantic-smoke:
+    cargo test --locked real_model_semantic_smoke -- --ignored --nocapture
+
+# macOS/Linux real-model CLI and TUI smoke (requires cached model files)
+semantic-app-smoke binary="target/debug/pi-history":
+    uv run tests/semantic_app_smoke.py "{{binary}}"
