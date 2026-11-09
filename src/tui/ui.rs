@@ -838,6 +838,11 @@ fn render_view_status_bar(frame: &mut Frame, app: &App, state: &ViewState, area:
         Span::styled(format!("iff·{} ", edit_diff_status), label_style),
         Span::styled("i", key_style),
         Span::styled(format!("nfo·{} ", timing_status), label_style),
+        Span::styled("A", key_style),
+        Span::styled(
+            format!("NSI·{} ", if state.render_ansi { "on" } else { "off" }),
+            label_style,
+        ),
         Span::styled("a", key_style),
         Span::styled(
             format!("uto·{}", if app.auto_reload() { "on " } else { "off" }),
@@ -1069,6 +1074,9 @@ fn build_style(style: &LineStyle) -> Style {
     }
     if style.dimmed {
         s = s.fg(rgb(th().text_muted));
+    }
+    if let Some(ansi) = style.ansi {
+        s = s.patch(ansi);
     }
     s
 }
@@ -1335,6 +1343,7 @@ fn render_help_overlay(
             ("t".into(), "Cycle tools: summary/off/trunc/full"),
             ("d".into(), "Toggle edit diffs"),
             ("T".into(), "Toggle thinking"),
+            ("A".into(), "Toggle ANSI colors/styles in text and thinking"),
             ("i".into(), "Toggle timing"),
             ("r".into(), "Reload session from disk"),
             ("a".into(), "Toggle auto-reload (once a second)"),
@@ -4386,5 +4395,31 @@ mod composer_tests {
             (vec!["λ".to_string(), "    X".to_string()], 1, 5)
         );
         assert_eq!(composer_lines("", 0, 0), (vec!["".to_string()], 0, 0));
+    }
+}
+
+#[cfg(test)]
+mod ansi_style_tests {
+    use super::*;
+    #[test]
+    fn terminal_styles_override_thinking_color_and_support_backgrounds_and_resets() {
+        let style = LineStyle {
+            fg: Some((100, 100, 100)),
+            italic: true,
+            dimmed: true,
+            ansi: Some(
+                Style::default()
+                    .fg(Color::Indexed(1))
+                    .bg(Color::Rgb(1, 2, 3))
+                    .underlined()
+                    .remove_modifier(Modifier::ITALIC),
+            ),
+            ..Default::default()
+        };
+        let rendered = build_style(&style);
+        assert_eq!(rendered.fg, Some(Color::Indexed(1)));
+        assert_eq!(rendered.bg, Some(Color::Rgb(1, 2, 3)));
+        assert!(rendered.add_modifier.contains(Modifier::UNDERLINED));
+        assert!(!rendered.add_modifier.contains(Modifier::ITALIC));
     }
 }

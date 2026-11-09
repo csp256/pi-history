@@ -91,6 +91,7 @@ pub fn run_with_loader(
     tool_display: ToolDisplayMode,
     show_thinking: bool,
     show_info: bool,
+    render_ansi: bool,
     auto_reload: bool,
     reverse_history: bool,
     keys: KeyBindings,
@@ -122,6 +123,7 @@ pub fn run_with_loader(
         search_options,
     );
     app.set_initial_show_info(show_info);
+    app.set_initial_render_ansi(render_ansi);
     app.set_auto_reload(auto_reload);
     app.set_initial_reverse_history(reverse_history);
 
@@ -266,11 +268,13 @@ pub fn run_with_loader(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_single_file(
     path: PathBuf,
     tool_display: ToolDisplayMode,
     show_thinking: bool,
     show_info: bool,
+    render_ansi: bool,
     auto_reload: bool,
     reverse_history: bool,
     keys: KeyBindings,
@@ -290,6 +294,7 @@ pub fn run_single_file(
     let mut guard = TerminalGuard::new()?;
     let mut app = App::new_single_file(path, tool_display, show_thinking, keys);
     app.set_initial_show_info(show_info);
+    app.set_initial_render_ansi(render_ansi);
     app.set_auto_reload(auto_reload);
     app.set_initial_reverse_history(reverse_history);
 

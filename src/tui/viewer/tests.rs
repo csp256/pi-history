@@ -320,6 +320,7 @@ fn rendered_text(conversation: &RenderedConversation) -> String {
 
 fn test_render_options(tool_display: ToolDisplayMode) -> RenderOptions {
     RenderOptions {
+        render_ansi: false,
         tool_display,
         show_thinking: false,
         show_timing: false,
@@ -570,6 +571,7 @@ fn tool_call_metadata_tracks_truncated_and_expanded_state() {
     render_tool_call(
         &mut lines,
         &ToolCallRenderSpec {
+            render_ansi: false,
             name: "Bash",
             input: &input,
             label: "Pi",
@@ -598,6 +600,7 @@ fn tool_call_metadata_tracks_truncated_and_expanded_state() {
     render_tool_call(
         &mut expanded,
         &ToolCallRenderSpec {
+            render_ansi: false,
             name: "Bash",
             input: &input,
             label: "Pi",
@@ -1565,4 +1568,81 @@ fn reversing_empty_or_single_message_is_a_noop() {
             before
         );
     }
+}
+
+#[test]
+fn ansi_thinking_is_styled_before_wrapping_and_theme_does_not_override_it() {
+    let entries=vec![RenderableEntry{entry_index:0,entry:serde_json::from_value(serde_json::json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"\u{1b}[31mRED\u{1b}[39m normal"}]}})).unwrap()}];
+    let mut options = test_render_options(ToolDisplayMode::Off);
+    options.show_thinking = true;
+    options.render_ansi = true;
+    let rendered = render_parsed_conversation(&entries, &options);
+    let text = rendered_text(&rendered);
+    assert!(text.contains("RED normal"));
+    assert!(!text.contains("[39m"));
+    assert!(!text.contains('\x1b'));
+    let red = rendered
+        .lines
+        .iter()
+        .flat_map(|line| &line.spans)
+        .find(|(text, _)| text == "RED")
+        .unwrap();
+    assert!(red.1.italic);
+    assert_eq!(
+        red.1.ansi.unwrap().fg,
+        Some(ratatui::style::Color::Indexed(1))
+    );
+    options.render_ansi = false;
+    let raw = render_parsed_conversation(&entries, &options);
+    assert!(
+        raw.lines
+            .iter()
+            .flat_map(|line| &line.spans)
+            .all(|(_, style)| style.ansi.is_none())
+    );
+}
+
+#[test]
+fn ansi_tool_result_truncation_and_expansion_keep_output_identity() {
+    let entries=vec![RenderableEntry{entry_index:0,entry:serde_json::from_value(serde_json::json!({"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"ansi-tool","content":"\u{1b}[32mone\ntwo\nthree\nfour\nfive\u{1b}[0m"}]}})).unwrap()}];
+    let mut options = test_render_options(ToolDisplayMode::Truncated);
+    options.render_ansi = true;
+    let short = render_parsed_conversation(&entries, &options);
+    let text = rendered_text(&short);
+    assert!(text.contains("one"));
+    assert!(text.contains("more lines"));
+    assert!(!text.contains("five"));
+    assert!(!text.contains('\x1b'));
+    let id = short
+        .lines
+        .iter()
+        .find_map(|line| line.tool_output_id.clone())
+        .unwrap();
+    options.expanded_tool_outputs.insert(id.clone());
+    let full = render_parsed_conversation(&entries, &options);
+    assert!(rendered_text(&full).contains("five"));
+    assert!(
+        full.lines
+            .iter()
+            .any(|line| line.clickable && line.tool_output_id.as_ref() == Some(&id))
+    );
+}
+
+#[test]
+fn enabling_ansi_does_not_change_ordinary_markdown() {
+    let text = "# Heading\n\n**bold** and `code`\n\n- list";
+    let raw = super::markdown::render_text_to_lines(text, 40, false);
+    let enabled = super::markdown::render_text_to_lines(text, 40, true);
+    let spans = |lines: Vec<super::markdown::StyledLine>| {
+        lines
+            .into_iter()
+            .map(|line| {
+                line.spans
+                    .into_iter()
+                    .map(|(text, style)| (text, style.fg, style.bold, style.italic))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(spans(raw), spans(enabled));
 }

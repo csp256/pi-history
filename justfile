@@ -52,3 +52,7 @@ run *ARGS:
 # Test the optional Pi companion without installing Node dependencies
 bridge-test:
     node --test bridge/server.test.mjs
+
+# macOS/Linux terminal smoke test for ANSI trace styling
+ansi-smoke binary="target/debug/pi-history":
+    uv run tests/ansi_smoke.py "{{binary}}"

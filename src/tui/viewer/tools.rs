@@ -4,7 +4,7 @@ use super::ledger::{
     LedgerRow, NameCol, push_row, render_continuation_dimmed, render_ledger_block_plain_dimmed,
     render_truncation_indicator,
 };
-use super::markdown::render_markdown_to_lines;
+use super::markdown::render_text_to_lines;
 use super::timing::TimingSlot;
 use super::*;
 
@@ -89,6 +89,7 @@ pub(super) fn tool_result_display_text(content: Option<&serde_json::Value>) -> S
 /// Descriptor for one tool-call rendering pass shared by entry and
 /// summary-expansion render paths.
 pub(super) struct ToolCallRenderSpec<'a> {
+    pub render_ansi: bool,
     pub name: &'a str,
     pub input: &'a serde_json::Value,
     pub label: &'a str,
@@ -104,6 +105,7 @@ pub(super) struct ToolCallRenderSpec<'a> {
 /// Descriptor for one tool-result rendering pass shared by entry and
 /// summary-expansion render paths.
 pub(super) struct ToolResultRenderSpec<'a> {
+    pub render_ansi: bool,
     pub text: &'a str,
     pub content_width: usize,
     pub timing: TimingSlot<'a>,
@@ -114,6 +116,7 @@ pub(super) struct ToolResultRenderSpec<'a> {
 /// Render a formatted tool call with proper styling
 pub(super) fn render_tool_call(lines: &mut Vec<RenderedLine>, spec: &ToolCallRenderSpec<'_>) {
     let ToolCallRenderSpec {
+        render_ansi,
         name,
         input,
         label,
@@ -125,6 +128,7 @@ pub(super) fn render_tool_call(lines: &mut Vec<RenderedLine>, spec: &ToolCallRen
         tool_output_id,
         expanded,
     } = *spec;
+    let ansi_width = render_ansi.then_some(content_width);
     let formatted = tool_format::format_tool_call(name, input, content_width);
 
     let header_content = vec![(
@@ -182,6 +186,7 @@ pub(super) fn render_tool_call(lines: &mut Vec<RenderedLine>, spec: &ToolCallRen
                     body_timing,
                     Some(tool_output_id),
                     true,
+                    ansi_width,
                 );
                 render_truncation_indicator(
                     lines,
@@ -191,11 +196,19 @@ pub(super) fn render_tool_call(lines: &mut Vec<RenderedLine>, spec: &ToolCallRen
                     Some(tool_output_id),
                 );
             } else {
-                render_tool_body(lines, &body, dimmed, body_timing, None, false);
+                render_tool_body(lines, &body, dimmed, body_timing, None, false, ansi_width);
             }
         } else {
             let id = (tool_display == ToolDisplayMode::Truncated).then_some(tool_output_id);
-            render_tool_body(lines, &body, dimmed, body_timing, id, id.is_some());
+            render_tool_body(
+                lines,
+                &body,
+                dimmed,
+                body_timing,
+                id,
+                id.is_some(),
+                ansi_width,
+            );
         }
     }
 }
@@ -208,7 +221,21 @@ fn render_tool_body(
     timing: TimingSlot<'_>,
     tool_output_id: Option<&ToolOutputId>,
     clickable: bool,
+    ansi_width: Option<usize>,
 ) {
+    if let Some(width) = ansi_width
+        && super::ansi::has_ansi(text)
+    {
+        push_ansi_rows(
+            lines,
+            super::ansi::render(text, width),
+            timing,
+            tool_output_id,
+            clickable,
+            true,
+        );
+        return;
+    }
     for line in text.lines() {
         let style = if line.starts_with("+ ") {
             LineStyle {
@@ -242,9 +269,40 @@ fn render_tool_body(
     }
 }
 
+fn push_ansi_rows(
+    lines: &mut Vec<RenderedLine>,
+    rows: Vec<super::markdown::StyledLine>,
+    timing: TimingSlot<'_>,
+    id: Option<&ToolOutputId>,
+    clickable: bool,
+    dimmed: bool,
+) {
+    for (index, mut row) in rows.into_iter().enumerate() {
+        for (_, style) in &mut row.spans {
+            style.dimmed = dimmed;
+        }
+        push_row(
+            lines,
+            LedgerRow {
+                timing: if index == 0 {
+                    timing
+                } else {
+                    timing.continuation()
+                },
+                name: NameCol::BlankPlain,
+                separator_dimmed: dimmed,
+                tool_output_id: id,
+                clickable,
+            },
+            row.spans,
+        );
+    }
+}
+
 /// Render tool result with arrow indicator and markdown
 pub(super) fn render_tool_result(lines: &mut Vec<RenderedLine>, spec: &ToolResultRenderSpec<'_>) {
     let ToolResultRenderSpec {
+        render_ansi,
         text,
         content_width,
         timing,
@@ -254,13 +312,13 @@ pub(super) fn render_tool_result(lines: &mut Vec<RenderedLine>, spec: &ToolResul
     } = *spec;
     // Fence plain text tool results to prevent markdown misinterpretation.
     // If the result already contains fenced code blocks, assume it's intentional markdown.
-    let text = if text.contains("```") {
+    let text = if text.contains("```") || (render_ansi && super::ansi::has_ansi(text)) {
         text.to_string()
     } else {
         format!("```text\n{}\n```", text)
     };
     // Render markdown
-    let styled_lines = render_markdown_to_lines(&text, content_width);
+    let styled_lines = render_text_to_lines(&text, content_width, render_ansi);
 
     let total = styled_lines.len();
     let limit = if tool_display == ToolDisplayMode::Truncated
@@ -332,6 +390,35 @@ pub(super) fn render_dimmed_tool_result_body(
     timing: TimingSlot<'_>,
 ) {
     let truncated_mode = options.tool_display == ToolDisplayMode::Truncated;
+    if options.render_ansi && super::ansi::has_ansi(content_str) {
+        let mut rows = super::ansi::render(content_str, options.content_width);
+        let total = rows.len();
+        let limit = if truncated_mode && !expanded {
+            total.min(TRUNCATED_RESULT_LINES)
+        } else {
+            total
+        };
+        let clickable = truncated_mode && (expanded || limit < total);
+        rows.truncate(limit);
+        push_ansi_rows(
+            lines,
+            rows,
+            timing,
+            clickable.then_some(output_id),
+            clickable,
+            true,
+        );
+        if limit < total {
+            render_truncation_indicator(
+                lines,
+                total - limit,
+                true,
+                timing.continuation(),
+                Some(output_id),
+            );
+        }
+        return;
+    }
     if truncated_mode && !expanded {
         let content_lines: Vec<&str> = content_str.lines().collect();
         let total = content_lines.len();

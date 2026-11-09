@@ -77,6 +77,7 @@ pub struct App {
     show_thinking: bool,
     /// Persistent view setting: whether to show timing information
     show_timing: bool,
+    render_ansi: bool,
     /// Whether the open viewer polls for changes.
     auto_reload: bool,
     /// Persistent viewer order preference.
@@ -153,6 +154,7 @@ impl App {
             tool_display: parts.tool_display,
             show_thinking: parts.show_thinking,
             show_timing: true,
+            render_ansi: false,
             auto_reload: true,
             reverse_history: false,
             last_auto_reload_check: None,
@@ -363,6 +365,13 @@ impl App {
         self.show_timing = enabled;
         if let AppMode::View(state) = &mut self.app_mode {
             state.show_timing = enabled;
+        }
+    }
+
+    pub fn set_initial_render_ansi(&mut self, enabled: bool) {
+        self.render_ansi = enabled;
+        if let AppMode::View(state) = &mut self.app_mode {
+            state.render_ansi = enabled;
         }
     }
 

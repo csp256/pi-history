@@ -124,6 +124,12 @@ fn run() -> Result<()> {
         false,
     );
     let show_info = display_config.show_info();
+    let render_ansi = resolve_bool_setting(
+        args.render_ansi,
+        args.no_render_ansi,
+        display_config.render_ansi,
+        false,
+    );
     let auto_reload = display_config.auto_reload();
     let reverse_history = display_config.reverse_history.unwrap_or(false);
     tool_format::set_render_edit_diffs(display_config.edit_diffs());
@@ -288,6 +294,7 @@ fn run() -> Result<()> {
             tool_display,
             show_thinking,
             show_info,
+            render_ansi,
             auto_reload,
             reverse_history,
             keys,
@@ -328,6 +335,7 @@ fn run() -> Result<()> {
         tool_display,
         show_thinking,
         show_info,
+        render_ansi,
         auto_reload,
         reverse_history,
         keys,

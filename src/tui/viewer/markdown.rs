@@ -24,6 +24,18 @@ pub(super) fn render_markdown_to_lines(input: &str, max_width: usize) -> Vec<Sty
         .collect()
 }
 
+pub(super) fn render_text_to_lines(
+    input: &str,
+    width: usize,
+    render_ansi: bool,
+) -> Vec<StyledLine> {
+    if render_ansi && super::ansi::has_ansi(input) {
+        super::ansi::render(input, width)
+    } else {
+        render_markdown_to_lines(input, width)
+    }
+}
+
 fn attrs_to_line_style(attrs: &crate::markdown::layout::Attrs) -> LineStyle {
     let fg = if let Some(rgb) = attrs.fg {
         Some(rgb)
@@ -43,6 +55,7 @@ fn attrs_to_line_style(attrs: &crate::markdown::layout::Attrs) -> LineStyle {
         italic: attrs.italic,
         dimmed: attrs.dimmed || attrs.strikethrough,
         fg,
+        ..Default::default()
     }
 }
 

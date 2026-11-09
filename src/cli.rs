@@ -268,6 +268,14 @@ pub struct Args {
     #[arg(long, group = "thinking_display")]
     pub show_thinking: bool,
 
+    /// Interpret ANSI colors/styles in TUI text and thinking traces
+    #[arg(long, conflicts_with = "no_render_ansi")]
+    pub render_ansi: bool,
+
+    /// Leave ANSI interpretation disabled in the TUI viewer
+    #[arg(long, conflicts_with = "render_ansi")]
+    pub no_render_ansi: bool,
+
     /// Hide thinking blocks and subagent internals from the conversation output
     #[arg(long, group = "thinking_display")]
     pub hide_thinking: bool,
