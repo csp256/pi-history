@@ -31,4 +31,8 @@ syntect = { version = "5.2", default-features = false, features = ["default-fanc
 terminal-light = "1.0"
 tempfile = "3"
 indicatif = "0.17"
-fastembed = { version = "5.13", default-features = false, features = ["hf-hub-rustls-tls", "ort-download-binaries-rustls-tls"] }
+# Keep ORT 1.23.x: the 1.24.x bundle can fail BERT kernels with GetElementType.
+fastembed = { version = "=5.12.1", default-features = false, features = ["hf-hub-rustls-tls", "ort-download-binaries-rustls-tls"] }
+
+# Configure a bounded ONNX thread pool before fastembed creates its session.
+ort = { version = "=2.0.0-rc.11", default-features = false, features = ["std"] }
