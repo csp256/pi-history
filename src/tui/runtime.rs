@@ -81,6 +81,7 @@ pub fn run_with_loader(
     tool_display: ToolDisplayMode,
     show_thinking: bool,
     show_info: bool,
+    auto_reload: bool,
     keys: KeyBindings,
     workspace_filter: bool,
     current_project_dir_name: Option<String>,
@@ -105,6 +106,7 @@ pub fn run_with_loader(
         search_options,
     );
     app.set_initial_show_info(show_info);
+    app.set_auto_reload(auto_reload);
 
     loop {
         loop {
@@ -155,6 +157,7 @@ pub fn run_with_loader(
 
         app.receive_search_results();
 
+        app.check_auto_reload(viewport_height);
         guard.terminal.draw(|frame| ui::render(frame, &app))?;
 
         let poll_timeout = if app.is_loading() {
@@ -167,6 +170,9 @@ pub fn run_with_loader(
             Duration::from_secs(3600)
         };
 
+        let poll_timeout = app
+            .auto_reload_wait()
+            .map_or(poll_timeout, |wait| wait.min(poll_timeout));
         let events = drain_events(poll_timeout)?;
         for ev in events {
             let key = match ev {
@@ -237,6 +243,7 @@ pub fn run_single_file(
     tool_display: ToolDisplayMode,
     show_thinking: bool,
     show_info: bool,
+    auto_reload: bool,
     keys: KeyBindings,
 ) -> Result<()> {
     let original_hook = std::panic::take_hook();
@@ -249,6 +256,7 @@ pub fn run_single_file(
     let mut guard = TerminalGuard::new()?;
     let mut app = App::new_single_file(path, tool_display, show_thinking, keys);
     app.set_initial_show_info(show_info);
+    app.set_auto_reload(auto_reload);
 
     loop {
         let frame_area = guard.terminal.get_frame().area();
@@ -266,9 +274,16 @@ pub fn run_single_file(
             AppMode::List => viewport_height,
         };
 
+        app.check_auto_reload(viewport_height);
         guard.terminal.draw(|frame| ui::render(frame, &app))?;
 
-        let events = drain_events(Duration::from_secs(3600))?;
+        let mut poll_timeout = app
+            .status_message_remaining()
+            .unwrap_or(Duration::from_secs(3600));
+        if let Some(wait) = app.auto_reload_wait() {
+            poll_timeout = poll_timeout.min(wait);
+        }
+        let events = drain_events(poll_timeout)?;
         for ev in events {
             let key = match ev {
                 Event::Key(k) if k.kind == KeyEventKind::Press => k,

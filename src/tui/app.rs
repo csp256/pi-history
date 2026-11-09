@@ -75,6 +75,9 @@ pub struct App {
     show_thinking: bool,
     /// Persistent view setting: whether to show timing information
     show_timing: bool,
+    /// Whether the open viewer polls for changes.
+    auto_reload: bool,
+    last_auto_reload_check: Option<std::time::Instant>,
     /// Whether the app is running in single file mode (direct input, no list)
     single_file_mode: bool,
     /// Configurable keybindings
@@ -145,6 +148,8 @@ impl App {
             tool_display: parts.tool_display,
             show_thinking: parts.show_thinking,
             show_timing: true,
+            auto_reload: false,
+            last_auto_reload_check: None,
             single_file_mode: parts.single_file_mode,
             keys: parts.keys,
             workspace_filter: parts.workspace_filter,

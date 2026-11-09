@@ -599,3 +599,219 @@ fn reload_key_does_not_steal_search_typing_or_ctrl_r_resume() {
     );
     assert!(!view_text(&app).contains("Changed"));
 }
+
+fn append_reload_message(path: &std::path::Path, text: &str) {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+    writeln!(
+        file,
+        "{}",
+        serde_json::json!({"type":"user","message":{"role":"user","content":text}})
+    )
+    .unwrap();
+}
+
+fn allow_auto_reload_poll(app: &mut App) {
+    app.last_auto_reload_check = None;
+}
+
+#[test]
+fn auto_reload_is_opt_in_and_a_toggles_it_without_stealing_search_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    write_named_conversation(&path, "Original");
+    let mut app = app_with_conversation(path.clone(), None);
+    assert!(!app.auto_reload());
+    app.enter_view_mode(80);
+    append_reload_message(&path, "Automatic addition");
+    app.check_auto_reload(10);
+    assert!(!view_text(&app).contains("Automatic addition"));
+    assert_eq!(app.auto_reload_wait(), None);
+    app.handle_key(KeyCode::Char('a'), KeyModifiers::NONE, 10);
+    assert!(app.auto_reload());
+    assert_eq!(app.auto_reload_wait(), Some(Duration::ZERO));
+    app.check_auto_reload(10);
+    assert!(view_text(&app).contains("Automatic addition"));
+    assert!(
+        app.status_message.is_none(),
+        "background refresh must not cover the shortcuts"
+    );
+    app.handle_key(KeyCode::Char('a'), KeyModifiers::NONE, 10);
+    assert!(!app.auto_reload());
+    app.handle_key(KeyCode::Char('/'), KeyModifiers::NONE, 10);
+    app.handle_key(KeyCode::Char('a'), KeyModifiers::NONE, 10);
+    assert!(!app.auto_reload());
+    let AppMode::View(state) = app.app_mode() else {
+        unreachable!()
+    };
+    assert_eq!(state.search_query, "a");
+}
+
+#[test]
+fn auto_reload_skips_unchanged_files_and_throttles_checks() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    write_named_conversation(&path, "Original");
+    let mut app = app_with_conversation(path.clone(), None);
+    app.enter_view_mode(80);
+    app.set_auto_reload(true);
+    let snapshot = match app.app_mode() {
+        AppMode::View(state) => state.parsed_entries.clone().unwrap(),
+        _ => unreachable!(),
+    };
+    app.check_auto_reload(10);
+    let AppMode::View(state) = app.app_mode() else {
+        unreachable!()
+    };
+    assert!(Arc::ptr_eq(
+        &snapshot,
+        state.parsed_entries.as_ref().unwrap()
+    ));
+    append_reload_message(&path, "Wait for next poll");
+    app.check_auto_reload(10);
+    assert!(!view_text(&app).contains("Wait for next poll"));
+    app.last_auto_reload_check = Some(std::time::Instant::now() - Duration::from_secs(2));
+    app.check_auto_reload(10);
+    assert!(view_text(&app).contains("Wait for next poll"));
+    app.exit_view_mode();
+    assert!(app.auto_reload()); // Remember the toggle across sessions.
+    assert_eq!(app.auto_reload_wait(), None); // No polling in the session list.
+}
+
+#[test]
+fn auto_reload_follows_bottom_but_preserves_earlier_reading_position() {
+    for follow in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        write_named_conversation(&path, "Start");
+        for i in 0..30 {
+            append_reload_message(&path, &format!("Message {i}"));
+        }
+        let mut app = app_with_conversation(path.clone(), None);
+        app.enter_view_mode(80);
+        app.set_auto_reload(true);
+        if let AppMode::View(state) = &mut app.app_mode {
+            state.scroll_offset = if follow {
+                state.total_lines.saturating_sub(10)
+            } else {
+                10
+            };
+        }
+        for i in 0..10 {
+            append_reload_message(&path, &format!("New {i}"));
+        }
+        app.check_auto_reload(10);
+        let AppMode::View(state) = app.app_mode() else {
+            unreachable!()
+        };
+        assert_eq!(
+            state.scroll_offset,
+            if follow {
+                state.total_lines.saturating_sub(10)
+            } else {
+                10
+            }
+        );
+        assert_eq!(state.message_ranges.len(), 41);
+    }
+}
+
+#[test]
+fn auto_reload_does_not_tail_follow_during_search_or_message_navigation() {
+    for searching in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        write_named_conversation(&path, "Start");
+        for i in 0..30 {
+            append_reload_message(&path, &format!("Message {i}"));
+        }
+        let mut app = app_with_conversation(path.clone(), None);
+        app.enter_view_mode(80);
+        app.set_auto_reload(true);
+        let old_scroll;
+        if let AppMode::View(state) = &mut app.app_mode {
+            state.scroll_offset = state.total_lines.saturating_sub(10);
+            old_scroll = state.scroll_offset;
+            if searching {
+                state.search_mode = ViewSearchMode::Active;
+                state.search_query = "New search match".to_string();
+            } else {
+                state.message_nav_active = true;
+                state.focused_message = Some(state.message_ranges.len() - 1);
+            }
+        } else {
+            unreachable!()
+        }
+        append_reload_message(&path, "New search match");
+        app.check_auto_reload(10);
+        let AppMode::View(state) = app.app_mode() else {
+            unreachable!()
+        };
+        assert_eq!(state.scroll_offset, old_scroll);
+        if searching {
+            assert_eq!(state.search_matches.len(), 1);
+        } else {
+            assert_eq!(state.focused_message, Some(30));
+        }
+    }
+}
+
+#[test]
+fn auto_reload_single_file_recovers_after_read_failure_and_partial_append() {
+    use std::io::Write;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    write_named_conversation(&path, "Original");
+    let mut app = App::new_single_file(
+        path.clone(),
+        ToolDisplayMode::Off,
+        false,
+        KeyBindings::default(),
+    );
+    app.check_view_resize(80, 10);
+    app.set_auto_reload(true);
+    std::fs::remove_file(&path).unwrap();
+    app.check_auto_reload(10);
+    assert!(view_text(&app).contains("Original"));
+    assert!(
+        app.status_message
+            .as_ref()
+            .unwrap()
+            .0
+            .starts_with("Failed to reload session:")
+    );
+    write_named_conversation(&path, "Recovered");
+    allow_auto_reload_poll(&mut app);
+    app.check_auto_reload(10);
+    assert!(view_text(&app).contains("Recovered"));
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
+    write!(
+        file,
+        "{{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":\"Partially"
+    )
+    .unwrap();
+    file.flush().unwrap();
+    allow_auto_reload_poll(&mut app);
+    app.check_auto_reload(10);
+    assert!(view_text(&app).contains("Recovered"));
+    assert!(!view_text(&app).contains("Partially"));
+    writeln!(file, " completed\"}}}}").unwrap();
+    file.flush().unwrap();
+    allow_auto_reload_poll(&mut app);
+    app.check_auto_reload(10);
+    assert!(view_text(&app).contains("Partially completed"));
+}
+
+#[test]
+fn auto_reload_config_is_optional_and_accepts_both_values() {
+    let display = crate::config::DisplayConfig::default();
+    assert_eq!(display.auto_reload, None);
+    for enabled in [false, true] {
+        let config: crate::config::ConfigFile =
+            toml::from_str(&format!("[display]\nauto_reload = {enabled}\n")).unwrap();
+        assert_eq!(config.display.unwrap().auto_reload, Some(enabled));
+    }
+}
