@@ -33,6 +33,33 @@ pub enum DialogMode {
     SemanticDebug,
     /// Rename the selected conversation
     Rename { input: String, cursor: usize },
+    /// Text-only composer targeting the viewed session, never a new Pi process.
+    MessageComposer(Box<MessageComposer>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComposerPhase {
+    Connecting,
+    Ready,
+    Sending,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MessageAttempt {
+    pub request_id: String,
+    pub message: String,
+    pub delivery: crate::live_bridge::Delivery,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MessageComposer {
+    pub session_file: PathBuf,
+    pub input: String,
+    pub cursor: usize,
+    pub target: Option<crate::live_bridge::LiveTarget>,
+    pub error: Option<String>,
+    pub phase: ComposerPhase,
+    pub last_attempt: Option<MessageAttempt>,
 }
 
 /// Main application mode

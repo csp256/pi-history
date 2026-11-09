@@ -6,8 +6,8 @@ use crate::error::{AppError, Result};
 use crate::history::{Conversation, LoaderMessage};
 use crate::tui::viewer::ToolDisplayMode;
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseButton,
-    MouseEventKind,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind,
 };
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::prelude::*;
@@ -25,7 +25,12 @@ impl TerminalGuard {
         terminal::enable_raw_mode().map_err(|e| AppError::Io(io::Error::other(e)))?;
 
         let mut stdout = io::stdout();
-        if let Err(e) = crossterm::execute!(stdout, EnterAlternateScreen, EnableMouseCapture) {
+        if let Err(e) = crossterm::execute!(
+            stdout,
+            EnterAlternateScreen,
+            EnableMouseCapture,
+            EnableBracketedPaste
+        ) {
             let _ = terminal::disable_raw_mode();
             return Err(AppError::Io(io::Error::other(e)));
         }
@@ -35,8 +40,12 @@ impl TerminalGuard {
             Ok(t) => t,
             Err(e) => {
                 let _ = terminal::disable_raw_mode();
-                let _ =
-                    crossterm::execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
+                let _ = crossterm::execute!(
+                    io::stdout(),
+                    DisableMouseCapture,
+                    DisableBracketedPaste,
+                    LeaveAlternateScreen
+                );
                 return Err(AppError::Io(io::Error::other(e)));
             }
         };
@@ -51,6 +60,7 @@ impl Drop for TerminalGuard {
         let _ = crossterm::execute!(
             self.terminal.backend_mut(),
             DisableMouseCapture,
+            DisableBracketedPaste,
             LeaveAlternateScreen
         );
     }
@@ -92,7 +102,12 @@ pub fn run_with_loader(
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         let _ = terminal::disable_raw_mode();
-        let _ = crossterm::execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
+        let _ = crossterm::execute!(
+            io::stdout(),
+            DisableMouseCapture,
+            DisableBracketedPaste,
+            LeaveAlternateScreen
+        );
         original_hook(panic_info);
     }));
 
@@ -161,6 +176,7 @@ pub fn run_with_loader(
 
         app.apply_initial_view_position(viewport_height);
         app.check_auto_reload(viewport_height);
+        app.receive_message_results();
         guard.terminal.draw(|frame| ui::render(frame, &app))?;
 
         let poll_timeout = if app.is_loading() {
@@ -176,10 +192,19 @@ pub fn run_with_loader(
         let poll_timeout = app
             .auto_reload_wait()
             .map_or(poll_timeout, |wait| wait.min(poll_timeout));
+        let poll_timeout = if app.has_message_work() {
+            poll_timeout.min(Duration::from_millis(50))
+        } else {
+            poll_timeout
+        };
         let events = drain_events(poll_timeout)?;
         for ev in events {
             let key = match ev {
                 Event::Key(k) if k.kind == KeyEventKind::Press => k,
+                Event::Paste(text) => {
+                    app.handle_paste(&text);
+                    continue;
+                }
                 Event::Mouse(m) => {
                     match m.kind {
                         MouseEventKind::ScrollDown => {
@@ -253,7 +278,12 @@ pub fn run_single_file(
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         let _ = terminal::disable_raw_mode();
-        let _ = crossterm::execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
+        let _ = crossterm::execute!(
+            io::stdout(),
+            DisableMouseCapture,
+            DisableBracketedPaste,
+            LeaveAlternateScreen
+        );
         original_hook(panic_info);
     }));
 
@@ -281,6 +311,7 @@ pub fn run_single_file(
 
         app.apply_initial_view_position(viewport_height);
         app.check_auto_reload(viewport_height);
+        app.receive_message_results();
         guard.terminal.draw(|frame| ui::render(frame, &app))?;
 
         let mut poll_timeout = app
@@ -289,10 +320,19 @@ pub fn run_single_file(
         if let Some(wait) = app.auto_reload_wait() {
             poll_timeout = poll_timeout.min(wait);
         }
+        let poll_timeout = if app.has_message_work() {
+            poll_timeout.min(Duration::from_millis(50))
+        } else {
+            poll_timeout
+        };
         let events = drain_events(poll_timeout)?;
         for ev in events {
             let key = match ev {
                 Event::Key(k) if k.kind == KeyEventKind::Press => k,
+                Event::Paste(text) => {
+                    app.handle_paste(&text);
+                    continue;
+                }
                 Event::Mouse(m) => {
                     match m.kind {
                         MouseEventKind::ScrollDown => app.scroll_mouse(3, viewport_height),

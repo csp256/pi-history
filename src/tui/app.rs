@@ -23,6 +23,7 @@ use std::time::Duration;
 mod dialog_state;
 mod input_controller;
 mod list_state;
+mod message_state;
 mod search_state;
 mod types;
 mod view_state;
@@ -30,9 +31,9 @@ mod view_state;
 use search_state::{SearchCommand, SearchResponse, SemanticSearchState, spawn_search_worker};
 #[allow(unused_imports)]
 pub use types::{
-    Action, AppMode, DialogMode, LIST_LINES_PER_ITEM, ListSearchMode, LoadingState,
-    SemanticProgress, SemanticResultMetadata, TuiSearchOptions, ViewSearchMode, ViewState,
-    list_lines_per_item,
+    Action, AppMode, ComposerPhase, DialogMode, LIST_LINES_PER_ITEM, ListSearchMode, LoadingState,
+    MessageComposer, SemanticProgress, SemanticResultMetadata, TuiSearchOptions, ViewSearchMode,
+    ViewState, list_lines_per_item,
 };
 
 /// App state
@@ -65,6 +66,7 @@ pub struct App {
     loading_state: LoadingState,
     /// Current dialog overlay (confirm, menu)
     dialog_mode: DialogMode,
+    message_rx: Option<mpsc::Receiver<message_state::MessageJob>>,
     /// Main app mode (list or view)
     app_mode: AppMode,
     /// Status message with timestamp for auto-clear
@@ -145,6 +147,7 @@ impl App {
             cursor_pos: 0,
             loading_state: parts.loading_state,
             dialog_mode: DialogMode::None,
+            message_rx: None,
             app_mode: parts.app_mode,
             status_message: None,
             tool_display: parts.tool_display,

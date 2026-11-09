@@ -13,6 +13,12 @@ Explicit CLI flags and config settings override these defaults.
 Press `t` to cycle modes, run `pi-history --tool-display off`, or set
 `tool_display = "off"` under `[display]` in `~/.config/pi-history/config.toml`.
 
+Optional: **press `m` in a session viewer to message its already-running Pi instance**.
+Install the [Pi companion](bridge/README.md) with
+`pi install git:github.com/csp256/pi-history`, then `/reload` in existing Pi tabs.
+Enter sends normally (steer when busy); Alt+Enter queues a follow-up. Pi keeps its
+own queue settings. No companion means no sending, and no second agent is started.
+
 Build this fork from source (no fork release binaries are published yet):
 
 ```sh
@@ -370,6 +376,20 @@ Use `--tool-display off` to hide tools explicitly.
 Extended thinking models include reasoning steps in their output. Thinking is
 hidden by default. Use `--show-thinking` (or press `T` in the TUI) to show
 thinking blocks.
+
+### Messaging a running conversation
+
+With the optional [local Pi bridge](bridge/README.md), press `m` in the viewer to
+compose a text-only user message for that exact running session (its active branch).
+**Enter** prompts while idle or steers while busy; **Alt+Enter** / **Ctrl+Q** queues
+a follow-up. Use **Ctrl+J** / **Shift+Enter** for newlines; **Esc** cancels the draft.
+The original Pi terminal receives the message and runs the agent. Queue policy stays
+in Pi, not in a new viewer preference. Slash commands are sent as plain text.
+
+Delivery is authenticated and session-bound, refuses ambiguous duplicate Pi
+processes, and never edits history files or launches an agent. Offline/error drafts
+are retained. A success notice acknowledges dispatch, not model completion; a lost
+acknowledgement is reported as uncertain and is never retried automatically.
 
 ### Resuming conversations
 

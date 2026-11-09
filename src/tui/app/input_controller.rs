@@ -115,6 +115,51 @@ impl App {
         true
     }
 
+    /// Bracketed paste is literal text, never a sequence of viewer shortcuts.
+    pub fn handle_paste(&mut self, text: &str) {
+        if matches!(self.dialog_mode, DialogMode::MessageComposer(_)) {
+            self.handle_message_paste(text);
+            return;
+        }
+        let clean: String = text
+            .replace("\r\n", "\n")
+            .replace(['\r', '\n', '\t'], " ")
+            .chars()
+            .filter(|c| !c.is_control())
+            .collect();
+        if clean.len() > crate::live_bridge::MAX_MESSAGE_BYTES {
+            return;
+        }
+        match &mut self.dialog_mode {
+            DialogMode::Rename { input, cursor } => {
+                let byte = input
+                    .char_indices()
+                    .nth(*cursor)
+                    .map_or(input.len(), |(i, _)| i);
+                input.insert_str(byte, &clean);
+                *cursor += clean.chars().count();
+            }
+            DialogMode::None => match &mut self.app_mode {
+                AppMode::List => {
+                    let byte = self
+                        .query
+                        .char_indices()
+                        .nth(self.cursor_pos)
+                        .map_or(self.query.len(), |(i, _)| i);
+                    self.query.insert_str(byte, &clean);
+                    self.cursor_pos += clean.chars().count();
+                    self.dispatch_search();
+                }
+                AppMode::View(state) if state.search_mode == ViewSearchMode::Typing => {
+                    state.search_query.push_str(&clean);
+                    self.update_search_results();
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
     pub fn handle_key(
         &mut self,
         code: KeyCode,
@@ -132,6 +177,7 @@ impl App {
                 return None;
             }
             DialogMode::Rename { .. } => return self.handle_rename_key(code, modifiers),
+            DialogMode::MessageComposer(_) => return self.handle_message_key(code, modifiers),
             DialogMode::None => {}
         }
 
@@ -295,6 +341,10 @@ impl App {
             }
             KeyCode::Char('i') => {
                 self.toggle_view_timing(viewport_height);
+                None
+            }
+            KeyCode::Char('m') if modifiers.is_empty() => {
+                self.start_message_composer();
                 None
             }
             KeyCode::Char('o') if modifiers.is_empty() => {

@@ -1,0 +1,12 @@
+{
+  "name": "@csp256/pi-history-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Optional local message bridge for the pi-history standalone viewer",
+  "keywords": ["pi-package"],
+  "engines": { "node": ">=22.18" },
+  "peerDependencies": { "@earendil-works/pi-coding-agent": "*" },
+  "pi": { "extensions": ["./bridge/index.ts"] },
+  "scripts": { "test": "node --test bridge/server.test.mjs" }
+}
