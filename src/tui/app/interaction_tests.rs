@@ -815,3 +815,187 @@ fn auto_reload_config_is_optional_and_accepts_both_values() {
         assert_eq!(config.display.unwrap().auto_reload, Some(enabled));
     }
 }
+
+#[test]
+fn order_toggle_reverses_whole_messages_and_persists_across_views() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    write_named_conversation(&path, "Old first\n\nOld second");
+    append_reload_message(&path, "Newest first\n\nNewest second");
+    let mut app = app_with_conversation(path.clone(), None);
+    app.enter_view_mode(80);
+    let original = view_text(&app);
+    assert!(original.find("Old first").unwrap() < original.find("Newest first").unwrap());
+    app.handle_key(KeyCode::Char('o'), KeyModifiers::NONE, 5);
+    let text = view_text(&app);
+    assert!(text.find("Newest first").unwrap() < text.find("Old first").unwrap());
+    assert!(text.find("Newest first").unwrap() < text.find("Newest second").unwrap());
+    let AppMode::View(state) = app.app_mode() else {
+        unreachable!()
+    };
+    assert!(state.reverse_history);
+    assert_eq!(state.scroll_offset, 0);
+    assert_eq!(
+        state
+            .message_ranges
+            .iter()
+            .map(|m| m.entry_index)
+            .collect::<Vec<_>>(),
+        vec![1, 0]
+    );
+    app.exit_view_mode();
+    app.enter_view_mode(80);
+    let AppMode::View(state) = app.app_mode() else {
+        unreachable!()
+    };
+    assert!(state.reverse_history);
+    app.handle_key(KeyCode::Char('o'), KeyModifiers::NONE, 5);
+    assert_eq!(view_text(&app), original);
+    app.handle_key(KeyCode::Char('/'), KeyModifiers::NONE, 5);
+    app.handle_key(KeyCode::Char('o'), KeyModifiers::NONE, 5);
+    let AppMode::View(state) = app.app_mode() else {
+        unreachable!()
+    };
+    assert!(!state.reverse_history);
+    assert_eq!(state.search_query, "o");
+}
+
+#[test]
+fn reversed_navigation_and_copy_use_original_entry_ids_after_reload_and_resize() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    write_named_conversation(&path, "Old");
+    for i in 0..20 {
+        append_reload_message(&path, &format!("Message {i}"));
+    }
+    let mut app = app_with_conversation(path.clone(), None);
+    app.set_initial_reverse_history(true);
+    app.enter_view_mode(80);
+    app.handle_key(KeyCode::Char('J'), KeyModifiers::NONE, 5);
+    let focused_entry = match app.app_mode() {
+        AppMode::View(state) => state.message_ranges[state.focused_message.unwrap()].entry_index,
+        _ => unreachable!(),
+    };
+    assert_eq!(focused_entry, 19);
+    append_reload_message(&path, "Newly appended");
+    app.reload_view(5);
+    app.check_view_resize(50, 5);
+    let AppMode::View(state) = app.app_mode() else {
+        unreachable!()
+    };
+    let focused = &state.message_ranges[state.focused_message.unwrap()];
+    assert_eq!(focused.entry_index, focused_entry);
+    let copied = crate::tui::export::extract_message_text(
+        &path,
+        focused.entry_index,
+        crate::tui::export::ExportOptions {
+            show_tools: false,
+            show_thinking: false,
+        },
+    )
+    .unwrap();
+    assert!(copied.contains("Message 18"));
+    assert!(!copied.contains("Newly appended"));
+}
+
+#[test]
+fn reverse_order_recomputes_search_and_keeps_settings_and_expansions() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    write_named_conversation(&path, "match old");
+    append_reload_message(&path, "match newest");
+    let mut app = app_with_conversation(path, None);
+    app.enter_view_mode(80);
+    let expansion = crate::tui::viewer::ToolOutputId("saved".to_string());
+    if let AppMode::View(state) = &mut app.app_mode {
+        state.show_thinking = true;
+        state.show_timing = false;
+        state.expanded_tool_outputs.insert(expansion.clone());
+        state.search_mode = ViewSearchMode::Active;
+        state.search_query = "match".to_string();
+    }
+    app.handle_key(KeyCode::Char('o'), KeyModifiers::NONE, 5);
+    let AppMode::View(state) = app.app_mode() else {
+        unreachable!()
+    };
+    assert!(state.show_thinking);
+    assert!(!state.show_timing);
+    assert_eq!(state.tool_display, ToolDisplayMode::Hidden);
+    assert!(state.expanded_tool_outputs.contains(&expansion));
+    assert_eq!(state.search_matches.len(), 2);
+    let first_match = &state.rendered_lines[state.search_matches[0]];
+    assert!(
+        first_match
+            .spans
+            .iter()
+            .map(|(s, _)| s.as_str())
+            .collect::<String>()
+            .contains("newest")
+    );
+}
+
+#[test]
+fn newest_first_auto_reload_follows_top_or_anchors_earlier_messages() {
+    for follow in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        write_named_conversation(&path, "Start");
+        for i in 0..30 {
+            append_reload_message(&path, &format!("Message {i}"));
+        }
+        let mut app = app_with_conversation(path.clone(), None);
+        app.set_initial_reverse_history(true);
+        app.set_auto_reload(true);
+        app.enter_view_mode(80);
+        let (old_entry, old_relative);
+        if let AppMode::View(state) = &mut app.app_mode {
+            state.scroll_offset = if follow { 0 } else { 10 };
+            let message = state
+                .message_ranges
+                .iter()
+                .find(|m| m.start_line >= state.scroll_offset)
+                .unwrap();
+            old_entry = message.entry_index;
+            old_relative = message.start_line as isize - state.scroll_offset as isize;
+        } else {
+            unreachable!()
+        }
+        append_reload_message(&path, "Newest addition");
+        app.check_auto_reload(5);
+        let AppMode::View(state) = app.app_mode() else {
+            unreachable!()
+        };
+        assert_eq!(state.message_ranges[0].entry_index, 31);
+        if follow {
+            assert_eq!(state.scroll_offset, 0);
+        } else {
+            let message = state
+                .message_ranges
+                .iter()
+                .find(|m| m.entry_index == old_entry)
+                .unwrap();
+            assert_eq!(
+                message.start_line as isize - state.scroll_offset as isize,
+                old_relative
+            );
+        }
+    }
+}
+
+#[test]
+fn newest_first_startup_config_applies_to_single_file_and_stays_opt_in() {
+    let default = crate::config::DisplayConfig::default();
+    assert_eq!(default.reverse_history, None);
+    let config: crate::config::ConfigFile =
+        toml::from_str("[display]\nreverse_history = true\n").unwrap();
+    assert_eq!(config.display.unwrap().reverse_history, Some(true));
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("session.jsonl");
+    write_named_conversation(&path, "Oldest");
+    append_reload_message(&path, "Newest");
+    let mut app = App::new_single_file(path, ToolDisplayMode::Off, false, KeyBindings::default());
+    app.set_initial_reverse_history(true);
+    app.check_view_resize(80, 5);
+    let text = view_text(&app);
+    assert!(text.find("Newest").unwrap() < text.find("Oldest").unwrap());
+}

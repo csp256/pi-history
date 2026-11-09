@@ -297,6 +297,10 @@ impl App {
                 self.toggle_view_timing(viewport_height);
                 None
             }
+            KeyCode::Char('o') if modifiers.is_empty() => {
+                self.toggle_view_order(viewport_height);
+                None
+            }
             KeyCode::Char('a') if modifiers.is_empty() => {
                 self.set_auto_reload(!self.auto_reload());
                 None

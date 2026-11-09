@@ -82,6 +82,7 @@ pub fn run_with_loader(
     show_thinking: bool,
     show_info: bool,
     auto_reload: bool,
+    reverse_history: bool,
     keys: KeyBindings,
     workspace_filter: bool,
     current_project_dir_name: Option<String>,
@@ -107,6 +108,7 @@ pub fn run_with_loader(
     );
     app.set_initial_show_info(show_info);
     app.set_auto_reload(auto_reload);
+    app.set_initial_reverse_history(reverse_history);
 
     loop {
         loop {
@@ -244,6 +246,7 @@ pub fn run_single_file(
     show_thinking: bool,
     show_info: bool,
     auto_reload: bool,
+    reverse_history: bool,
     keys: KeyBindings,
 ) -> Result<()> {
     let original_hook = std::panic::take_hook();
@@ -257,6 +260,7 @@ pub fn run_single_file(
     let mut app = App::new_single_file(path, tool_display, show_thinking, keys);
     app.set_initial_show_info(show_info);
     app.set_auto_reload(auto_reload);
+    app.set_initial_reverse_history(reverse_history);
 
     loop {
         let frame_area = guard.terminal.get_frame().area();

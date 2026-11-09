@@ -127,6 +127,35 @@ pub struct RenderedConversation {
     pub messages: Vec<MessageRange>,
 }
 
+impl RenderedConversation {
+    /// Reverse whole rendered message blocks, never the lines within a message.
+    /// Stable entry/tool IDs survive so navigation, copying, and expansions still work.
+    pub fn reverse_messages(&mut self) {
+        if self.messages.len() < 2 {
+            return;
+        }
+        let old_lines = std::mem::take(&mut self.lines);
+        let old_messages = std::mem::take(&mut self.messages);
+        // Any non-message prefix stays in place. Include each message's separator
+        // in its block, including blank lines inside expanded tool summaries.
+        self.lines
+            .extend_from_slice(&old_lines[..old_messages[0].start_line]);
+        for (index, message) in old_messages.iter().enumerate().rev() {
+            let end = old_messages
+                .get(index + 1)
+                .map_or(old_lines.len(), |next| next.start_line);
+            let start_line = self.lines.len();
+            self.lines
+                .extend_from_slice(&old_lines[message.start_line..end]);
+            self.messages.push(MessageRange {
+                entry_index: message.entry_index,
+                start_line,
+                end_line: start_line + message.end_line - message.start_line,
+            });
+        }
+    }
+}
+
 /// Format an ISO 8601 timestamp to HH:MM local time
 fn format_timestamp(iso_timestamp: &str) -> Option<String> {
     use chrono::{DateTime, Local};
